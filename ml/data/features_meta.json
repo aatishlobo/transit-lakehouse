@@ -1,0 +1,23 @@
+{
+  "generated_at": "2026-08-10T23:17:19.892881+00:00",
+  "agency": "SF",
+  "rows": 1345275,
+  "arrivals_resolved": 78593,
+  "distinct_trips": 10320,
+  "distinct_routes": 65,
+  "time_span": {
+    "first_issued": "2026-08-05T19:06:35",
+    "last_issued": "2026-08-10T16:12:40"
+  },
+  "target_residual_s": {
+    "mean": 212.8,
+    "median": 111,
+    "p10": -48,
+    "p90": 553,
+    "min": -3030,
+    "max": 6176
+  },
+  "label_provenance": "VehiclePositions STOPPED_AT (resolver A)",
+  "feature_provenance": "TripUpdates (agency forecast)",
+  "leakage_note": "Features are restricted to values knowable at issue time. lead_time (actual - issued) is deliberately EXCLUDED because it contains the target; horizon_s (predicted - issued) is used instead. Labels and features come from different feeds."
+}

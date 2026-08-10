@@ -1,0 +1,76 @@
+{
+  "checks": [
+    {
+      "name": "null_zero_discrimination",
+      "status": "PASS",
+      "detail": "408149 rows compared against raw protobuf presence: 199675 absent, 10693 explicit-zero, 197781 nonzero, 0 violations",
+      "measured": {
+        "absent": 199675,
+        "explicit_zero": 10693,
+        "nonzero": 197781,
+        "violations": 0,
+        "pct_absent": 48.9
+      }
+    },
+    {
+      "name": "contract_validation",
+      "status": "PASS",
+      "detail": "245701 valid, 0 invalid ",
+      "measured": {
+        "valid": 245701,
+        "invalid": 0
+      }
+    },
+    {
+      "name": "grain_uniqueness",
+      "status": "PASS",
+      "detail": "6046 arrivals, 6046 distinct keys, 0 duplicated",
+      "measured": {
+        "arrivals": 6046,
+        "distinct": 6046,
+        "duplicates": 0
+      }
+    },
+    {
+      "name": "idempotent_resolution",
+      "status": "PASS",
+      "detail": "run1=6046 run2=6046 identical=True",
+      "measured": {
+        "run1": 6046,
+        "run2": 6046,
+        "identical": true
+      }
+    },
+    {
+      "name": "provenance_complete",
+      "status": "PASS",
+      "detail": "6046 arrivals; missing fields: none",
+      "measured": {
+        "arrivals": 6046,
+        "missing": {}
+      }
+    },
+    {
+      "name": "event_time_not_ingest_time",
+      "status": "PASS",
+      "detail": "0 arrivals share a timestamp with resolved_at; 194 distinct event times across 6046 arrivals",
+      "measured": {
+        "collisions": 0,
+        "distinct_event_times": 194
+      }
+    },
+    {
+      "name": "loop_route_revisits_observed",
+      "status": "INFO",
+      "detail": "0 of 1771 trips produced multiple arrivals at one stop_id in this sample (informational: a stop_id grain would collapse these; behaviour is asserted in tests/test_resolver.py)",
+      "measured": {
+        "trips_with_revisits": 0,
+        "trips": 1771
+      }
+    }
+  ],
+  "passed": 6,
+  "failed": 0,
+  "unmeasured": 0,
+  "informational": 1
+}

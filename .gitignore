@@ -1,0 +1,37 @@
+.env
+
+# Logs. poller.log was found to contain the 511 API key: requests embeds query
+# parameters in exception messages, so a failed fetch logged the full URL
+# including api_key=. Redacted at the source now (see poller.py), but logs stay
+# out of git regardless -- pitfall 0.5.
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Synthetic archive from `make fixture` -- regenerable, never committed.
+fixture_data/
+
+# The live archive is large and grows without bound. Ignored wholesale...
+data/
+
+# ...except the committed replay sample, which the course review path depends
+# on: the reviewer runs the pipeline end-to-end from these bytes with no API
+# key. Negating data/ alone is not enough -- git will not descend into an
+# excluded directory, so each parent must be re-included before the leaf.
+!data/
+!data/replay_sample/
+!data/replay_sample/**
+
+# Archive payloads are ignored everywhere by extension, so the sample's own
+# .pb.gz / .jsonl.gz files need an explicit exception scoped to that path.
+*.pb.gz
+*.jsonl.gz
+!data/replay_sample/**/*.pb.gz
+!data/replay_sample/**/*.jsonl.gz
+
+# Full ML feature table: 131MB, regenerable with `make features`. The committed
+# artifact is features_sample.csv.gz (a 1-in-8 strided sample, ~168k rows),
+# which reproduces the reported metrics -- see ml/README.md.
+ml/data/features.csv

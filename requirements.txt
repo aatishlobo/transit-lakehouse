@@ -1,0 +1,39 @@
+# Pinned to versions this repo is built and tested against.
+#
+# protobuf is capped below 7.x deliberately. gtfs-realtime-bindings itself
+# accepts any protobuf, but mlflow, databricks-sdk, and opentelemetry-proto
+# all require <7.0 -- so 7.x breaks any environment shared with the ML stack.
+# databricks-sdk additionally excludes 6.30.0, 6.30.1, and 6.31.0, which is
+# why the floor here is 6.32 rather than 6.30.
+#
+# Verified: proto2 presence semantics (HasField distinguishing absent from
+# zero) are identical on 6.33.6 and 7.34.1. The decoder's correctness does
+# not depend on the major version -- only the environment's does.
+#
+# An unpinned upgrade still changes decode behavior silently, which is why
+# DECODER_VERSION and protobuf_runtime are stamped on every archived row.
+# (Pitfall register 2.2.)
+gtfs-realtime-bindings==2.2.0
+protobuf>=6.32,<7.0
+requests>=2.31,<3.0
+
+# Event contracts. Pydantic v2 is required, not incidental: v1 coerced None to
+# a field's default, which would silently turn an absent delay back into 0 and
+# undo the entire absent-vs-zero invariant at the validation boundary.
+pydantic>=2.6,<3.0
+
+# Kafka client. confluent-kafka wraps librdkafka (C) rather than reimplementing
+# the protocol in Python, which is why it is the one used in production. It
+# ships prebuilt wheels, so no local librdkafka install is needed.
+confluent-kafka>=2.3,<3.0
+
+# --- bounded AI element: prediction-correction model -----------------------
+# scikit-learn only. Deliberately small: the dataset is tens of thousands of
+# rows with ~8 features, where gradient boosting is the right tool and a neural
+# network would be an unjustifiable choice we could not defend.
+scikit-learn>=1.4,<2.0
+pandas>=2.1,<3.0
+joblib>=1.3
+
+# dev
+pytest>=7.4

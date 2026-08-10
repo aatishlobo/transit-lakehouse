@@ -1,0 +1,182 @@
+{
+  "generated_at": "2026-08-09T21:53:32.045483+00:00",
+  "agency": "SF",
+  "method": {
+    "actual_arrival": "derived from VehiclePositions current_status=STOPPED_AT (resolver A)",
+    "prediction": "TripUpdates arrival.time, as published by the agency",
+    "independence": "labels from position data, predictions from TripUpdates -- no shared provenance, so this is not measuring the agency against itself"
+  },
+  "counts": {
+    "predictions_buffered": 729949,
+    "arrivals_seen": 3088,
+    "arrivals_matched": 2686,
+    "arrivals_unmatched": 402,
+    "pairs": 25501,
+    "pairs_dropped_negative_lead": 40,
+    "duplicate_predictions_collapsed": 729949,
+    "duplicate_arrivals_collapsed": 0
+  },
+  "measurement_bias": {
+    "poll_interval_s": [
+      120
+    ],
+    "coverage": "~21% of stop events captured; 90.3% of captured events appear in exactly one poll, so typical dwell << 120s poll interval. This limits sample size, not timestamp accuracy.",
+    "one_sided_offset": "A vehicle is observable as STOPPED_AT only between arrival and departure, so derived arrival times fall at or after the true arrival -- never before. Bias is LATE, bounded by dwell.",
+    "selection_bias": "Capture probability scales with dwell, so long-dwell stops (terminals, layovers, timepoints) are over-represented. Median observed dwell among multi-poll sightings: 353s.",
+    "interpretation": "The negative bias below means the agency predicts EARLIER than we observe. It is partly real and partly the two effects above, so treat it as an upper bound on agency optimism rather than a point estimate."
+  },
+  "by_lead_time": [
+    {
+      "lead_bucket": "0-2 min",
+      "n": 509,
+      "mean_error_s": -11.0,
+      "median_error_s": -7,
+      "median_abs_error_s": 13,
+      "p90_abs_error_s": 52,
+      "pct_within_60s": 92.7,
+      "pct_within_180s": 100.0
+    },
+    {
+      "lead_bucket": "2-5 min",
+      "n": 4603,
+      "mean_error_s": -45.7,
+      "median_error_s": -47,
+      "median_abs_error_s": 50,
+      "p90_abs_error_s": 112,
+      "pct_within_60s": 59.5,
+      "pct_within_180s": 98.4
+    },
+    {
+      "lead_bucket": "5-10 min",
+      "n": 4897,
+      "mean_error_s": -66.3,
+      "median_error_s": -64,
+      "median_abs_error_s": 70,
+      "p90_abs_error_s": 172,
+      "pct_within_60s": 43.3,
+      "pct_within_180s": 91.2
+    },
+    {
+      "lead_bucket": "10-20 min",
+      "n": 8919,
+      "mean_error_s": -98.5,
+      "median_error_s": -95,
+      "median_abs_error_s": 102,
+      "p90_abs_error_s": 257,
+      "pct_within_60s": 31.1,
+      "pct_within_180s": 77.0
+    },
+    {
+      "lead_bucket": "20+ min",
+      "n": 6573,
+      "mean_error_s": -141.5,
+      "median_error_s": -133,
+      "median_abs_error_s": 146,
+      "p90_abs_error_s": 375,
+      "pct_within_60s": 23.0,
+      "pct_within_180s": 59.3
+    }
+  ],
+  "top_routes_by_volume": [
+    {
+      "route_id": "SF:1",
+      "n": 1431,
+      "mean_error_s": -78.2,
+      "median_error_s": -51,
+      "median_abs_error_s": 75,
+      "p90_abs_error_s": 262,
+      "pct_within_60s": 40.3,
+      "pct_within_180s": 80.4
+    },
+    {
+      "route_id": "SF:49",
+      "n": 1392,
+      "mean_error_s": -80.3,
+      "median_error_s": -68.5,
+      "median_abs_error_s": 76.0,
+      "p90_abs_error_s": 211,
+      "pct_within_60s": 42.5,
+      "pct_within_180s": 85.0
+    },
+    {
+      "route_id": "SF:22",
+      "n": 1214,
+      "mean_error_s": -93.0,
+      "median_error_s": -70.0,
+      "median_abs_error_s": 81.0,
+      "p90_abs_error_s": 251,
+      "pct_within_60s": 41.1,
+      "pct_within_180s": 80.8
+    },
+    {
+      "route_id": "SF:8",
+      "n": 1208,
+      "mean_error_s": -107.0,
+      "median_error_s": -91.0,
+      "median_abs_error_s": 95.0,
+      "p90_abs_error_s": 235,
+      "pct_within_60s": 31.6,
+      "pct_within_180s": 80.3
+    },
+    {
+      "route_id": "SF:29",
+      "n": 1114,
+      "mean_error_s": -70.8,
+      "median_error_s": -51.5,
+      "median_abs_error_s": 66.0,
+      "p90_abs_error_s": 214,
+      "pct_within_60s": 46.9,
+      "pct_within_180s": 85.4
+    },
+    {
+      "route_id": "SF:44",
+      "n": 968,
+      "mean_error_s": 74.7,
+      "median_error_s": -59.0,
+      "median_abs_error_s": 86.0,
+      "p90_abs_error_s": 308,
+      "pct_within_60s": 37.9,
+      "pct_within_180s": 76.9
+    },
+    {
+      "route_id": "SF:24",
+      "n": 945,
+      "mean_error_s": -106.7,
+      "median_error_s": -82,
+      "median_abs_error_s": 85,
+      "p90_abs_error_s": 259,
+      "pct_within_60s": 36.3,
+      "pct_within_180s": 80.3
+    },
+    {
+      "route_id": "SF:43",
+      "n": 926,
+      "mean_error_s": -102.6,
+      "median_error_s": -87.0,
+      "median_abs_error_s": 92.0,
+      "p90_abs_error_s": 231,
+      "pct_within_60s": 38.2,
+      "pct_within_180s": 80.0
+    },
+    {
+      "route_id": "SF:30",
+      "n": 791,
+      "mean_error_s": -114.6,
+      "median_error_s": -90,
+      "median_abs_error_s": 115,
+      "p90_abs_error_s": 387,
+      "pct_within_60s": 31.7,
+      "pct_within_180s": 65.1
+    },
+    {
+      "route_id": "SF:48",
+      "n": 773,
+      "mean_error_s": -140.5,
+      "median_error_s": -103,
+      "median_abs_error_s": 103,
+      "p90_abs_error_s": 294,
+      "pct_within_60s": 26.4,
+      "pct_within_180s": 76.1
+    }
+  ]
+}

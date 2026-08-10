@@ -1,0 +1,252 @@
+{
+  "description": "Contiguous GTFS-Realtime replay sample cut from the live 511 regional archive. Raw protobuf, exactly as received.",
+  "source": "511.org GTFS-Realtime, agency=RG (Bay Area regional feed)",
+  "window_start_utc": "2026-08-06T21:52:46+00:00",
+  "window_end_utc": "2026-08-06T22:32:13+00:00",
+  "window_start_local": "2026-08-06T14:52:46",
+  "window_end_local": "2026-08-06T15:32:13",
+  "span_minutes": 39.5,
+  "poll_interval_s": 120,
+  "polls": {
+    "trip_updates": 20,
+    "vehicle_positions": 19
+  },
+  "max_gap_s_allowed": 300,
+  "total_bytes": 13668170,
+  "files": [
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053166-e2ab8dac.pb.gz",
+      "poll_epoch": 1786053166,
+      "bytes": 624945
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053287-8c3edf86.pb.gz",
+      "poll_epoch": 1786053287,
+      "bytes": 624102
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053407-72a34bd8.pb.gz",
+      "poll_epoch": 1786053407,
+      "bytes": 621359
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053607-5dd09e94.pb.gz",
+      "poll_epoch": 1786053607,
+      "bytes": 619919
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053727-29ecba2b.pb.gz",
+      "poll_epoch": 1786053727,
+      "bytes": 621928
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053848-f4908235.pb.gz",
+      "poll_epoch": 1786053848,
+      "bytes": 622002
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786053968-660764d8.pb.gz",
+      "poll_epoch": 1786053968,
+      "bytes": 623168
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054088-8586fcb8.pb.gz",
+      "poll_epoch": 1786054088,
+      "bytes": 625382
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054209-9743f86e.pb.gz",
+      "poll_epoch": 1786054209,
+      "bytes": 625602
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054329-ddc1d390.pb.gz",
+      "poll_epoch": 1786054329,
+      "bytes": 627115
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054450-448f2931.pb.gz",
+      "poll_epoch": 1786054450,
+      "bytes": 628464
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054570-983e758e.pb.gz",
+      "poll_epoch": 1786054570,
+      "bytes": 630142
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054690-66ad132f.pb.gz",
+      "poll_epoch": 1786054690,
+      "bytes": 626624
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054811-10b6803c.pb.gz",
+      "poll_epoch": 1786054811,
+      "bytes": 628466
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786054931-9c4d4c2c.pb.gz",
+      "poll_epoch": 1786054931,
+      "bytes": 628000
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786055051-f1eb6f74.pb.gz",
+      "poll_epoch": 1786055051,
+      "bytes": 624324
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786055172-6fafc931.pb.gz",
+      "poll_epoch": 1786055172,
+      "bytes": 623288
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786055292-defe97ac.pb.gz",
+      "poll_epoch": 1786055292,
+      "bytes": 620976
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786055413-05a9bb95.pb.gz",
+      "poll_epoch": 1786055413,
+      "bytes": 618003
+    },
+    {
+      "feed": "trip_updates",
+      "path": "raw/trip_updates/ingest_dt=2026-08-06/1786055533-0dfb0627.pb.gz",
+      "poll_epoch": 1786055533,
+      "bytes": 617459
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053171-759d16c3.pb.gz",
+      "poll_epoch": 1786053171,
+      "bytes": 61644
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053291-f9632f3e.pb.gz",
+      "poll_epoch": 1786053291,
+      "bytes": 61585
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053411-8507fa21.pb.gz",
+      "poll_epoch": 1786053411,
+      "bytes": 61792
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053611-77254b59.pb.gz",
+      "poll_epoch": 1786053611,
+      "bytes": 61953
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053732-3aca9567.pb.gz",
+      "poll_epoch": 1786053732,
+      "bytes": 62039
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053854-f18d402f.pb.gz",
+      "poll_epoch": 1786053854,
+      "bytes": 62132
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786053972-94533500.pb.gz",
+      "poll_epoch": 1786053972,
+      "bytes": 62453
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054093-f8afdf89.pb.gz",
+      "poll_epoch": 1786054093,
+      "bytes": 62587
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054214-70de02c8.pb.gz",
+      "poll_epoch": 1786054214,
+      "bytes": 62646
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054333-a350b012.pb.gz",
+      "poll_epoch": 1786054333,
+      "bytes": 62827
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054455-f5896ebe.pb.gz",
+      "poll_epoch": 1786054455,
+      "bytes": 62705
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054574-85c7e19d.pb.gz",
+      "poll_epoch": 1786054574,
+      "bytes": 62871
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054695-cb85aee2.pb.gz",
+      "poll_epoch": 1786054695,
+      "bytes": 62833
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054815-bb0f4869.pb.gz",
+      "poll_epoch": 1786054815,
+      "bytes": 62763
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786054936-478e8841.pb.gz",
+      "poll_epoch": 1786054936,
+      "bytes": 62678
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786055055-520e1e38.pb.gz",
+      "poll_epoch": 1786055055,
+      "bytes": 62841
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786055179-f486899e.pb.gz",
+      "poll_epoch": 1786055179,
+      "bytes": 62807
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786055296-396d9d5a.pb.gz",
+      "poll_epoch": 1786055296,
+      "bytes": 63127
+    },
+    {
+      "feed": "vehicle_positions",
+      "path": "raw/vehicle_positions/ingest_dt=2026-08-06/1786055418-71f1785c.pb.gz",
+      "poll_epoch": 1786055418,
+      "bytes": 62619
+    }
+  ]
+}
