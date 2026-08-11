@@ -35,3 +35,12 @@ data/
 # artifact is features_sample.csv.gz (a 1-in-8 strided sample, ~168k rows),
 # which reproduces the reported metrics -- see ml/README.md.
 ml/data/features.csv
+
+# macOS / editor junk
+.DS_Store
+
+# Poller runtime state (single-instance lock)
+.poller.lock
+
+# Original scaffold archive -- superseded by the repo itself
+files.zip
