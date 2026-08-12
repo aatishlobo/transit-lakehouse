@@ -1,7 +1,7 @@
 {
   "attribution": "Data provided by 511.org (Metropolitan Transportation Commission) -- http://www.511.org",
   "data_licence": "511 Data Disseminator Agreement; see DATA_SOURCE.md",
-  "generated_at": "2026-08-12T02:07:26.999151+00:00",
+  "generated_at": "2026-08-12T02:08:25.715374+00:00",
   "agency": "SF",
   "method": {
     "actual_arrival": "derived from VehiclePositions current_status=STOPPED_AT (resolver A)",

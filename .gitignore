@@ -44,3 +44,6 @@ ml/data/features.csv
 
 # Original scaffold archive -- superseded by the repo itself
 files.zip
+
+# Built submission archives -- regenerate with scripts/build_submission.sh
+final_project_*.zip
