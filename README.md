@@ -261,7 +261,8 @@ redacted at source in poller output.
 
 | Document | Purpose |
 |---|---|
-| [`docs/ONBOARDING.md`](docs/ONBOARDING.md) | **Start here if you're joining** — full catch-up guide |
+| [`docs/PIPELINE_WALKTHROUGH.md`](docs/PIPELINE_WALKTHROUGH.md) | **Start here** — what actually happens to the data, stage by stage |
+| [`docs/ONBOARDING.md`](docs/ONBOARDING.md) | Full catch-up guide for a new contributor |
 | [`DATA_SOURCE.md`](DATA_SOURCE.md) | Source, schema, rights, limitations |
 | [`AI_USAGE.md`](AI_USAGE.md) | The AI element, and AI-assisted development disclosure |
 | [`CLAUDE.md`](CLAUDE.md) | Project constitution — invariants and rationale |

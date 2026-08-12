@@ -3,6 +3,11 @@
 **For a teammate joining cold.** Read this end to end before touching code. It
 takes about 25 minutes and will save you a day.
 
+> **If you want to understand what the system actually *does* first**, read
+> [`PIPELINE_WALKTHROUGH.md`](PIPELINE_WALKTHROUGH.md) — it follows one real
+> vehicle through all nine stages. This document assumes you already have that
+> picture.
+
 Written 10 August 2026. Course deliverable due **Friday 14 August**.
 
 ---
