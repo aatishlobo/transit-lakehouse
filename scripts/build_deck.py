@@ -183,6 +183,198 @@ def arrow(slide, x, y, w, color=ACCENT):
     return a
 
 
+
+
+# ---------------------------------------------------------------------------
+# Delivery scripts.
+#
+# These are near-verbatim talk tracks, not stage directions. Each is budgeted at
+# roughly 150 words per minute -- a sustainable presenting pace -- so the word
+# count and the time budget agree rather than merely coexisting.
+#
+# They are written to EXPLAIN MECHANISM. A listener who hears these should come
+# away understanding why absent-is-not-zero corrupts a metric, why message
+# ordering determines whether an arrival is detected at all, and why an
+# independent label source is what makes the headline number mean anything.
+# Asserting those conclusions without the mechanism is what makes a technical
+# talk forgettable.
+# ---------------------------------------------------------------------------
+SCRIPTS = {
+ 1: (10, "BORNA", """We measure how late Bay Area transit actually is. The catch: no agency
+publishes that number. We had to derive it.""",
+     "Do not linger. The hook is the next slide."),
+
+ 2: (50, "BORNA", """Transit agencies publish two live feeds. TripUpdates is predictions -- the
+agency telling us a bus will reach stop 22 at 15:07. VehiclePositions is GPS --
+bus 4821 is at this coordinate, right now.
+
+Notice what is missing. Neither feed ever says the bus ARRIVED. That fact is not
+published by anyone. It has to be derived from indirect evidence.
+
+Here is why that is the whole problem. Delay equals actual minus scheduled. The
+scheduled time is published and exact -- there is no error in it. So every bit of
+error in our derived actual transfers one-for-one into the delay figure. And
+nothing downstream can detect or correct it, because there is no ground truth to
+check against.""",
+     "Slow down on the last sentence. It justifies everything that follows."),
+
+ 3: (58, "BORNA", """Our source is 511.org, run by the Metropolitan Transportation Commission. One
+consolidated feed covers all 28 Bay Area operators, which matters because our
+quota is 60 requests an hour -- so we can only afford one poll every two minutes.
+
+On the left is one real event as it enters Kafka: a single stop on a single trip.
+
+Three things to notice. The Kafka key is service_date plus trip_id. We include
+the date because trip IDs repeat every single day. And we key on the trip so that
+every observation of one trip lands in the same partition, in order -- that
+ordering turns out to be load-bearing, and Aatish will show you why.
+
+The grain is service date, trip, and stop SEQUENCE -- never stop ID, because seven
+operators run loops that visit the same stop twice in one trip.
+
+And arrival_uncertainty is null. Not zero. Null.""",
+     "Point at the null on the last line and pause -- it sets up the next slide."),
+
+ 4: (38, "BORNA", """GTFS-Realtime uses protobuf version 2, where a field can be genuinely absent --
+and absent is different from zero. A delay of zero means the bus is exactly on
+time. Absent means the agency told us nothing at all.
+
+The trap is that the obvious way to read that field returns zero for both.
+
+We measured it. Forty-four percent of records carry no delay at all; nineteen of
+28 operators never populate it. Written the natural way, we would have reported
+all fifty-four thousand as perfectly on time -- a fabricated on-time spike that
+looks entirely plausible and corrupts every number above it.""",
+     "This is the strongest slide in the first half. Pause after 'perfectly on time'."),
+
+ 5: (62, "BORNA", """Here is the implemented path. The poller pulls protobuf every two minutes and
+writes the raw bytes to disk BEFORE attempting to decode them. A producer then
+reads from disk, validates every record against our contract, and publishes to
+Kafka. A resolver derives arrivals, an aggregator joins them back against the
+predictions, and that produces our metrics.
+
+Two design choices worth explaining.
+
+First: the poller only ever writes to disk, and everything downstream only ever
+reads from disk. So live operation and replay are literally the same code path --
+they differ only in whether new files keep appearing. When you run our demo you
+are running the real pipeline, not a mock of it.
+
+Second: Kafka is transport, not storage. Our topics expire after 24 hours on
+purpose. GTFS-Realtime has no history endpoint, so anything we fail to archive is
+gone permanently. The disk archive is the system of record.
+
+Aatish will now show this running on one vehicle.""",
+     "Trace the diagram left to right once. Do not read every box. Clear handover."),
+
+ 6: (45, "AATISH", """This is one real vehicle -- bus 5885, on a Muni trip. Across four consecutive
+polls you can watch it approach stop 46, report STOPPED_AT stop 47, still be
+stopped there, and then move on.
+
+The arrival is the FIRST stopped sighting. A parked bus reports that status on
+every poll while it waits, so if you took the last one you would be measuring
+departure, not arrival -- and nothing would ever tell you.
+
+Which means the resolver has to remember what it saw before. It holds per-trip
+state. And that is exactly why the partition key Borna described matters: if
+those four observations arrived out of order, we would record the arrival at the
+wrong moment, or miss it entirely.""",
+     "This closes the loop on the key decision from slide 3. Make that link explicit."),
+
+ 7: (48, "AATISH", """Here is the answer. Under two minutes out, Muni's predictions are excellent --
+median error thirteen seconds, ninety-three percent within a minute. But accuracy
+falls off steadily with horizon. At twenty minutes out, only twenty-three percent
+land within a minute.
+
+The bias column is the one that matters. It is negative at every horizon and it
+grows. Negative means the agency predicts EARLIER than we observe -- buses arrive
+later than promised.
+
+This number only means something because the two halves are independent. The
+prediction comes from TripUpdates; the actual comes from GPS positions. Had we
+derived arrivals from the predictions themselves -- which is a documented,
+tempting technique -- we would be measuring the agency against itself and getting
+a beautiful number that means absolutely nothing.""",
+     "Read ONE row aloud, not five. The independence point is the real content."),
+
+ 8: (42, "AATISH", """Our best lesson came from a feature we deleted.
+
+Day-of-week improved our test error by ten seconds. We removed it anyway --
+because Monday appeared only in our test window. Thirty-one percent of test rows
+carried a value the model had never seen in training, so they silently fell into
+an adjacent day's correction, purely through where the bin boundaries happened to
+land. The gain was an artifact of binning, not learned structure.
+
+Every real bug we hit had that same shape. A mislabelled partition column. A
+duplicate replay that doubled our sample size while leaving every average
+identical. None of them crashed. Several produced better-looking numbers than the
+correct version.""",
+     "Pause after 'we removed it anyway'. Let the oddity register before explaining."),
+
+ 9: (42, "AATISH", """Our main limitation is coverage. We capture only about twenty-one percent of
+stop events, because buses dwell at a stop for seconds while we sample every two
+minutes.
+
+And it is not random. The chance of catching a stop scales with how long the bus
+sits there -- so terminals and layovers are over-represented, and our derived
+arrivals are systematically biased late. Which means the optimism we measured is
+an upper bound, not a point estimate.
+
+So the next step is deliberately small: email 511 and request a rate limit
+increase. That one change attacks all three problems at once -- more events
+captured, tighter timestamps, and less selection bias toward long dwells.""",
+     "Being honest about the upper bound is worth marks. Do not soften it."),
+
+10: (12, "EITHER", """Everything you have seen runs from one command, with no API key, in under two
+minutes -- eighty-three tests and six acceptance checks, verified from a clean
+extract of the submitted zip. Questions?""",
+     "Stop talking. Leave the full minute for Q&A."),
+
+11: (0, "APPENDIX", """Not presented. Backup for Q&A on the AI element.
+
+We predict the residual -- actual arrival minus predicted arrival -- and apply it
+as a correction on top of the agency's ETA. Predicting zero is identical to
+trusting the agency, so the baseline comparison is exact.
+
+The interesting result is that both naive bias corrections are WORSE than doing
+nothing. Residuals are heavily right-skewed -- mean plus 213 seconds, median plus
+111 -- so adding the mean overcorrects the typical case. The model earns its
+fourteen-point-seven percent by learning a horizon, hour and route dependent
+correction instead of a constant.
+
+On leakage: labels come from GPS positions, features from predictions. Different
+feeds, so the label cannot contain the feature. We also excluded lead-time as a
+feature because it contains the target, and we split the data strictly forward in
+time rather than randomly.""",
+     "Only if asked."),
+}
+
+
+def apply_scripts(prs):
+    """Overwrite every slide's notes with its delivery script.
+
+    Applied as a final pass, keyed by slide index, so the scripts live in one
+    readable block rather than scattered through the layout code.
+    """
+    total = 0
+    for idx, slide in enumerate(prs.slides, 1):
+        if idx not in SCRIPTS:
+            continue
+        secs, speaker, script, delivery = SCRIPTS[idx]
+        total += secs
+        words = len(script.split())
+        wpm = round(words / (secs / 60)) if secs else 0
+        body = (
+            f"[{secs}s  |  {speaker}  |  ~{words} words @ {wpm} wpm]\n"
+            f"{'=' * 62}\n\n"
+            f"{script.strip()}\n\n"
+            f"{'-' * 62}\n"
+            f"DELIVERY: {delivery}"
+        )
+        slide.notes_slide.notes_text_frame.text = body
+    return total
+
+
 # ---------------------------------------------------------------------------
 def build() -> Path:
     prs = Presentation()
@@ -547,10 +739,12 @@ poll 4   IN_TRANSIT_TO  stop_sequence 48""", size=14)
     notes(s, 0,
           "APPENDIX -- not presented. Use if asked about the AI element.")
 
+    spoken = apply_scripts(prs)
+
     out = Path("Final_Presentation_Karimi_Lobo.pptx")
     prs.save(out)
 
-    total = sum(budget)
+    total = spoken
     print(f"slides: {len(prs.slides.__iter__.__self__._sldIdLst)}")
     print(f"speaker-note budget: {total}s of {TOTAL_BUDGET_S}s "
           f"({TOTAL_BUDGET_S - total:+d}s margin)")
