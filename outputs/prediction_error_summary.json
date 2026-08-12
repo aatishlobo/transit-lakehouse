@@ -1,5 +1,7 @@
 {
-  "generated_at": "2026-08-09T21:53:32.045483+00:00",
+  "attribution": "Data provided by 511.org (Metropolitan Transportation Commission) -- http://www.511.org",
+  "data_licence": "511 Data Disseminator Agreement; see DATA_SOURCE.md",
+  "generated_at": "2026-08-12T02:07:26.999151+00:00",
   "agency": "SF",
   "method": {
     "actual_arrival": "derived from VehiclePositions current_status=STOPPED_AT (resolver A)",
@@ -13,8 +15,8 @@
     "arrivals_unmatched": 402,
     "pairs": 25501,
     "pairs_dropped_negative_lead": 40,
-    "duplicate_predictions_collapsed": 729949,
-    "duplicate_arrivals_collapsed": 0
+    "duplicate_predictions_collapsed": 1459898,
+    "duplicate_arrivals_collapsed": 3088
   },
   "measurement_bias": {
     "poll_interval_s": [

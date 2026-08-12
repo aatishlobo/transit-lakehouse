@@ -366,6 +366,13 @@ def main() -> int:
         log.info("wrote %s (%d rows)", p, len(rows))
 
     summary = {
+        # Required by section 5(b) of the 511 Data Disseminator Agreement:
+        # the source must be acknowledged wherever the data is made available.
+        # Emitted from here rather than added by hand so it cannot drift out of
+        # the artifact on a later run.
+        "attribution": "Data provided by 511.org (Metropolitan Transportation "
+                       "Commission) -- http://www.511.org",
+        "data_licence": "511 Data Disseminator Agreement; see DATA_SOURCE.md",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "agency": args.agency or "ALL",
         "method": {
