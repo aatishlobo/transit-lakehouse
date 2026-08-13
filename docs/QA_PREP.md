@@ -1,7 +1,10 @@
 # Q&A preparation
 
-**Final presentation, Thursday 13 August, 6:16–6:24pm.** One minute of Q&A, so
+**Final presentation, Thursday 13 August, 6:16-6:24pm.** One minute of Q&A, so
 realistically two or three questions.
+
+Question 11 is worth reading first: the class used Confluent Cloud and we did
+not, so someone is likely to ask.
 
 Each answer below has a **short version** (what you actually say — 20 to 30
 seconds) and **if pressed** (depth if they follow up). Say the short version and
@@ -187,6 +190,33 @@ limit increase on day one. It's one email, and it attacks all three at once.
   accuracy — actual versus predicted — not true on-time performance against
   GTFS-Static. That needs a slowly-changing schedule dimension and an as-of join,
   which was out of scope.
+
+---
+
+## 11. Everyone else used Confluent Cloud. What are you running?
+
+**Short:** Apache Kafka, the open-source software, in a Docker container on a
+laptop. Confluent is a company that sells hosted Kafka and tooling — Kafka itself
+is free and Apache-licensed. We are even using the same client library the class
+used, `confluent-kafka`; it is just a client, and the Kafka wire protocol is a
+public standard, so any client talks to any broker.
+
+**If pressed — what would change to point at Confluent Cloud:** the bootstrap
+address plus four authentication lines. `security.protocol=SASL_SSL`, the
+mechanism, and an API key and secret. Producer, consumer, contracts, topics,
+partitioning and the resolver are all untouched. The design is not tied to a
+local broker.
+
+**Why we chose local:** the handout permits a local Kafka-compatible setup, and
+our review path is deterministic replay with no API key. A cloud path would
+require giving the reviewer working credentials to live resources, and any quota
+or expiry problem on their end becomes a grading problem. `docker compose up`
+works on any machine with nothing to keep alive.
+
+**What we give up — and the first one is real:** no Schema Registry, so
+compatibility is enforced by our Pydantic contracts and a version stamp rather
+than centrally; no replication or failover on a single broker; and no managed
+monitoring, so we have no consumer lag alerting.
 
 ---
 
