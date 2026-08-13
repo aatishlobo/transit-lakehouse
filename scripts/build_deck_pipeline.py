@@ -41,144 +41,131 @@ STAGE = RGBColor(0xE8, 0xF1, 0xF7)   # highlight for the stage under discussion
 # Delivery scripts -- near-verbatim, budgeted at ~150 words per minute.
 # ---------------------------------------------------------------------------
 SCRIPTS = {
- 1: (10, "BORNA", """We measure how late Bay Area transit actually is. The catch: no agency
-publishes that number. We had to derive it.""",
-     "Do not linger. The hook is next."),
+ 1: (10, "BORNA", """We measure how late Bay Area transit actually is. The catch that shaped this
+whole project is that no agency publishes that number, so we derive it.""",
+     "Don't linger — the hook is the next slide."),
 
- 2: (48, "BORNA", """Agencies publish two live feeds. TripUpdates is predictions -- a bus will
-reach stop 22 at 15:07. VehiclePositions is GPS -- bus 4821 is here, now.
+ 2: (48, "BORNA", """Transit agencies publish two live feeds, and between them you would think this
+question was already answered. TripUpdates gives you predictions: a bus will
+reach stop 22 at 15:07. VehiclePositions gives you GPS: bus 4821 is at this
+coordinate right now. But notice what neither of them ever says, which is that
+the bus actually arrived. That fact is not published by anyone, so it has to be
+derived from indirect evidence. And that is what makes this hard rather than
+tedious, because delay is actual minus scheduled, the scheduled time is published
+and exact, so every bit of error in our derived actual goes straight into the
+delay figure with nothing downstream able to catch it. Our user is a rider
+deciding whether to trust the estimate in their app.""",
+     "Slow down from 'And that is what makes this hard' — it justifies everything after."),
 
-Notice what is missing: neither feed ever says the bus ARRIVED. Nobody publishes
-that. It has to be derived.
+ 3: (36, "BORNA", """This is the whole talk in one picture, and we are going to walk it left to
+right. 511 gives us protobuf over HTTP. A poller writes those bytes straight to
+disk. A producer then decodes them, validates every record, and publishes to
+Kafka. A resolver turns GPS observations into arrivals, an aggregator joins those
+arrivals back against the original predictions, and that produces our answer.
+Finally a model learns the correction. Nine stages in total, and I will take the
+first four while Aatish takes the rest.""",
+     "Point along the diagram as you go. Don't read every box aloud."),
 
-And here is why that is hard rather than tedious. Delay equals actual minus
-scheduled. Scheduled is published and exact. So every bit of error in our derived
-actual goes straight into the delay number, and nothing downstream can catch it.
+ 4: (40, "BORNA", """Stages one and two. Our source is a single consolidated 511 feed covering all
+twenty-eight Bay Area operators in one request, and that matters more than it
+sounds, because our quota is sixty requests an hour, which means we can only
+afford one poll every two minutes. The poller itself has one rule that everything
+downstream depends on, which is to write the raw bytes to disk before attempting
+to decode them. A decoding bug is recoverable, because the file is still there
+and we can reprocess it. A poll we never took is gone forever, because there is
+no history endpoint. So we make the irreversible step the cheap one.""",
+     "Pause after the last sentence — it is the line people remember."),
 
-Our user is a rider deciding whether to trust the ETA in their app.""",
-     "Slow on the last sentence of paragraph three -- it justifies the whole project."),
+ 5: (48, "BORNA", """Stages three and four. The archive on disk is our system of record, and
+everything downstream reads from it. On the right is one real record as it enters
+Kafka, after validation. The key is service date plus trip ID, and the date is in
+there because trip IDs repeat every single day, so yesterday's version of this
+trip is genuinely a different journey. Now look at arrival uncertainty, because
+it is null rather than zero. Protobuf lets a field be genuinely absent, and
+absent means something quite different from zero. Zero means the vehicle is
+exactly on time. Absent means the agency told us nothing at all. Forty-four
+percent of records carry no delay value, and read the obvious way we would have
+called every single one of them perfectly on time.""",
+     "Land 'perfectly on time', pause, then hand over to Aatish."),
 
- 3: (36, "BORNA", """This is the whole talk in one picture, and we will walk it left to right.
+ 6: (44, "AATISH", """Stage five is Kafka. Four topics, three partitions each, and two of these
+settings are worth explaining. Retention is twenty-four hours, and that is
+deliberate, because Kafka is transport for us rather than storage, and the
+archive Borna just described is what we actually keep. The cleanup policy is
+delete and never compact, and that one genuinely matters, because compaction
+keeps only the newest message per key and discards the rest, but our data is the
+history. We detect arrivals by watching a vehicle change state across consecutive
+observations, so compaction would throw away precisely the thing we read. And the
+message key puts every observation of one trip into one partition, in order,
+which turns out to be the whole game.""",
+     "Ending on the key sets up the next slide directly."),
 
-511 gives us protobuf. A poller writes it to disk. A producer validates it and
-publishes to Kafka. A resolver turns GPS into arrivals. An aggregator joins those
-against the predictions, and that produces our answer. A model then learns the
-correction.
+ 7: (50, "AATISH", """Stage six, and this is the heart of the project. Here is one real vehicle, a
+Powell-Mason cable car, and across four consecutive polls you can watch it
+approach stop four, then report STOPPED_AT at stop four, and then move on to stop
+six. That transition is the arrival, and that sentence exists nowhere in the
+source data. We derived it. The subtlety is that it is the first stopped
+sighting, not the last, because a parked vehicle keeps reporting STOPPED_AT on
+every poll while it waits. So if you took the last one you would be measuring
+departure rather than arrival, and nothing would ever tell you that you had it
+wrong. Which means the resolver has to remember what it saw before, and that is
+exactly why the ordering guarantee matters.""",
+     "The rubric asks for one concrete example. Trace the four lines with your finger."),
 
-Nine stages. I will take the first four, Aatish takes the rest.""",
-     "Point along the diagram as you speak. Do not read every box."),
+ 8: (43, "AATISH", """Stages seven and eight. Now we join our derived arrivals against what the
+agency actually predicted. For that same cable car, two minutes ahead of time
+Muni predicted 14:53:54, and it arrived at 14:54:31, so thirty-seven seconds
+later than promised. That is one data point, and the pipeline produces
+twenty-five thousand of them. Aggregated, the close-in predictions are genuinely
+excellent, around thirteen seconds off. But at twenty minutes out only
+twenty-three percent land within a minute, and the bias is negative at every
+horizon, meaning vehicles consistently arrive later than promised. This is only
+credible because the two halves come from completely different feeds.""",
+     "Read one row of the table aloud, not five. The independence point is the content."),
 
- 4: (40, "BORNA", """Stages one and two. One consolidated 511 feed covers all 28 Bay Area
-operators -- which matters, because our quota is sixty requests an hour, so we can
-only afford one poll every two minutes.
+ 9: (36, "AATISH", """Our best lesson came from a feature we deleted. Day of week improved our test
+error by ten seconds, and we removed it anyway. The reason is that Monday
+appeared only in our test window, so thirty-one percent of test rows carried a
+value the model had never seen during training, and those rows quietly inherited
+an adjacent day's correction through wherever the bin boundaries happened to
+fall. The gain was an artifact rather than learned structure. And every real bug
+we hit had that same shape: none of them crashed, and several produced
+better-looking numbers than the correct version.""",
+     "Pause after 'we removed it anyway' and let the oddity register."),
 
-The poller has one rule: write the raw bytes to disk BEFORE trying to decode
-them. A decoding bug is recoverable -- reprocess the file. A poll never taken is
-gone forever, because there is no history endpoint.
+10: (38, "AATISH", """Our main limitation is coverage, because we catch only about twenty-one
+percent of stop events. Vehicles dwell at a stop for a matter of seconds while we
+sample every two minutes. And it is not random either, since the chance of
+catching a stop scales with how long the vehicle sits there, so terminals and
+layovers end up over-represented and our derived arrivals skew late. That means
+the optimism we measured should be read as an upper bound rather than a point
+estimate. So our next step is deliberately small: one email to 511 requesting a
+higher rate limit, which attacks all three of those problems at once.""",
+     "Being honest about the upper bound is worth marks. Don't soften it."),
 
-Make the irreversible step the cheap one.""",
-     "The 'irreversible step' line is the memorable one. Pause after it."),
+11: (12, "EITHER", """All of that runs from a single command, with no API key, in about two minutes,
+covering eighty-three tests and six acceptance checks. We are happy to take
+questions.""",
+     "Then stop talking. Leave the full minute for Q&A."),
 
- 5: (48, "BORNA", """Stages three and four. The archive on disk is our system of record.
+12: (0, "APPENDIX", """Not presented — this is backup in case we are asked about the AI element.
 
-On the right is one real record as it enters Kafka, after validation. Note the
-key: service date plus trip ID. The date is there because trip IDs repeat every
-single day.
+We predict the residual, which is the actual arrival minus the predicted arrival,
+and we apply it as a correction on top of the agency's own estimate. Predicting
+zero is identical to trusting the agency, so the baseline comparison is exact
+rather than approximate. The interesting result is that both naive bias
+corrections perform worse than doing nothing at all, because residuals are
+heavily right-skewed, with a mean of plus 213 seconds against a median of plus
+111, so adding the mean overcorrects the typical case. The model earns its
+fourteen point seven percent improvement by learning a correction that depends on
+horizon, hour and route rather than applying a constant.
 
-And look at arrival_uncertainty -- it is null, not zero. Protobuf lets a field be
-genuinely absent, and absent is different from zero. Zero means exactly on time.
-Absent means the agency told us nothing.
-
-Forty-four percent of records have no delay value. Read the obvious way, we would
-have called every one of them perfectly on time.""",
-     "This covers the contract AND the 44% finding. Land 'perfectly on time', then hand over."),
-
- 6: (44, "AATISH", """Stage five, Kafka. Four topics, three partitions each.
-
-Two settings worth explaining. Retention is twenty-four hours, deliberately --
-Kafka is transport, not storage. The archive Borna described is what we keep.
-
-And cleanup policy is delete, never compact. Compaction keeps only the newest
-message per key. Our data IS the history -- we detect arrivals by watching a
-vehicle change state across consecutive observations, so compaction would throw
-away exactly what we read.
-
-The key puts every observation of one trip in one partition, in order. That turns
-out to be the whole game.""",
-     "Ends on the key. That sets up the next slide directly."),
-
- 7: (50, "AATISH", """Stage six, and this is the heart of it.
-
-Here is one real vehicle -- a Powell-Mason cable car. Across four consecutive
-polls you can watch it approach stop four, report STOPPED_AT stop four, and then
-move on.
-
-That transition is the arrival. It exists nowhere in the source data; we derived
-it.
-
-The subtlety: it is the FIRST stopped sighting. A parked vehicle reports that
-status on every poll while it waits, so taking the last one would measure
-departure -- and nothing would ever tell you. Which means the resolver holds
-per-trip state, and that is why the ordering guarantee matters.""",
-     "This is the rubric's 'one concrete example'. Trace the four lines with your finger."),
-
- 8: (43, "AATISH", """Stages seven and eight. We join our derived arrivals against what the agency
-predicted.
-
-For that same cable car: two minutes ahead, Muni predicted 14:53:54. It arrived
-at 14:54:31 -- thirty-seven seconds late. That is one data point; the pipeline
-produces twenty-five thousand of them.
-
-Aggregated, close-in predictions are excellent -- thirteen seconds off. At twenty
-minutes out, only twenty-three percent land within a minute, and the bias is
-negative throughout, meaning vehicles arrive later than promised.
-
-This is credible only because the two halves come from different feeds.""",
-     "Read ONE row of the table, not five. The independence point is the real content."),
-
- 9: (36, "AATISH", """Our best lesson came from a feature we deleted.
-
-Day-of-week improved our test error by ten seconds. We removed it anyway, because
-Monday appeared only in our test window -- thirty-one percent of test rows had a
-value the model had never seen, so they inherited an adjacent day's correction
-through where the bins happened to fall.
-
-Every real bug we hit had that shape. None of them crashed. Several produced
-better-looking numbers.""",
-     "Pause after 'we removed it anyway'. Let the oddity register."),
-
-10: (36, "AATISH", """Our main limitation is coverage. We catch about twenty-one percent of stop
-events, because vehicles dwell for seconds and we sample every two minutes.
-
-And it is not random -- the chance of catching a stop scales with how long the
-vehicle sits there, so terminals are over-represented and our arrivals skew late.
-So the optimism we measured is an upper bound, not a point estimate.
-
-The next step is one email: ask 511 for a higher rate limit. That fixes all three
-problems at once.""",
-     "Being honest about the upper bound is worth marks. Do not soften it."),
-
-11: (12, "EITHER", """All of that runs from one command, no API key, in about two minutes --
-eighty-three tests and six acceptance checks. Questions?""",
-     "Stop talking. Leave the full minute for Q&A."),
-
-12: (0, "APPENDIX", """Not presented -- backup for Q&A on the AI element.
-
-We predict the residual: actual arrival minus predicted arrival, applied as a
-correction on top of the agency's ETA. Predicting zero is identical to trusting
-the agency, so the baseline comparison is exact.
-
-The interesting result is that both naive bias corrections are WORSE than doing
-nothing. Residuals are right-skewed -- mean plus 213 seconds, median plus 111 --
-so adding the mean overcorrects the typical case. The model earns its 14.7% by
-learning a horizon, hour and route dependent correction.
-
-On leakage: labels come from GPS, features from predictions. Different feeds, so
-the label cannot contain the feature. We excluded lead-time because it contains
-the target, and split strictly forward in time.""",
+On leakage: our labels come from GPS positions and our features come from
+predictions, so they are different feeds and the label cannot contain the
+feature. We also excluded lead time as a feature because it contains the target,
+and we split the data strictly forward in time rather than randomly.""",
      "Only if asked."),
 }
-
 
 def pipeline_strip(s, y, highlight=None, h=Inches(0.62), small=True):
     """The nine-stage strip, with the current stage highlighted.
