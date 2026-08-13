@@ -1,7 +1,7 @@
 .PHONY: venv install test poll-once poll poll-bg poll-status poll-stop \
         profile profile-json fixture profile-fixture clean clean-archive \
         kafka-up kafka-down kafka-topics kafka-logs replay-sample \
-        replay resolve aggregate evaluate demo features train predict
+        replay resolve aggregate evaluate demo demo-clean features train predict
 
 # Use the isolated venv explicitly rather than whatever `python` resolves to.
 # This service pins protobuf <7.0 for compatibility with the ML stack; picking
@@ -109,6 +109,11 @@ train-full:         ## train on the full local archive (not shipped)
 
 predict:            ## demo one corrected ETA
 	$(PY) -m ml.predict
+
+demo-clean:         ## demo from a torn-down Kafka -- use this for a live demo
+	@echo "tearing down Kafka so the run starts from empty topics..."
+	-@$(MAKE) --no-print-directory kafka-down
+	@$(MAKE) --no-print-directory demo
 
 # ---- Replay sample ------------------------------------------------------
 
