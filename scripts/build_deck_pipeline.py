@@ -45,8 +45,7 @@ SCRIPTS = {
 whole project is that no agency publishes that number, so we derive it.""",
      "Don't linger — the hook is the next slide."),
 
- 2: (48, "BORNA", """Transit agencies publish two live feeds, and between them you would think this
-question was already answered. TripUpdates gives you predictions: a bus will
+ 2: (48, "BORNA", """Transit agencies publish two live feeds. TripUpdates gives you predictions: a bus will
 reach stop 22 at 15:07. VehiclePositions gives you GPS: bus 4821 is at this
 coordinate right now. But notice what neither of them ever says, which is that
 the bus actually arrived. That fact is not published by anyone, so it has to be
@@ -67,11 +66,10 @@ first four while Aatish takes the rest.""",
      "Point along the diagram as you go. Don't read every box aloud."),
 
  4: (40, "BORNA", """Stages one and two. Our source is a single consolidated 511 feed covering all
-twenty-eight Bay Area operators in one request, and that matters more than it
-sounds, because our quota is sixty requests an hour, which means we can only
-afford one poll every two minutes. The poller itself has one rule that everything
-downstream depends on, which is to write the raw bytes to disk before attempting
-to decode them. A decoding bug is recoverable, because the file is still there
+twenty-eight Bay Area operators in one request, and that matters because our
+quota is sixty requests an hour, which means one poll every two minutes. The
+poller then has one rule everything depends on: write the raw bytes to disk
+before attempting to decode them. A decoding bug is recoverable, because the file is still there
 and we can reprocess it. A poll we never took is gone forever, because there is
 no history endpoint. So we make the irreversible step the cheap one.""",
      "Pause after the last sentence — it is the line people remember."),
@@ -79,9 +77,8 @@ no history endpoint. So we make the irreversible step the cheap one.""",
  5: (48, "BORNA", """Stages three and four. The archive on disk is our system of record, and
 everything downstream reads from it. On the right is one real record as it enters
 Kafka, after validation. The key is service date plus trip ID, and the date is in
-there because trip IDs repeat every single day, so yesterday's version of this
-trip is genuinely a different journey. Now look at arrival uncertainty, because
-it is null rather than zero. Protobuf lets a field be genuinely absent, and
+there because trip IDs repeat every single day. Now look at arrival uncertainty,
+because it is null rather than zero. Protobuf lets a field be genuinely absent, and
 absent means something quite different from zero. Zero means the vehicle is
 exactly on time. Absent means the agency told us nothing at all. Forty-four
 percent of records carry no delay value, and read the obvious way we would have
@@ -92,9 +89,8 @@ called every single one of them perfectly on time.""",
 settings are worth explaining. Retention is twenty-four hours, and that is
 deliberate, because Kafka is transport for us rather than storage, and the
 archive Borna just described is what we actually keep. The cleanup policy is
-delete and never compact, and that one genuinely matters, because compaction
-keeps only the newest message per key and discards the rest, but our data is the
-history. We detect arrivals by watching a vehicle change state across consecutive
+delete and never compact, because compaction keeps only the newest message per
+key and discards the rest, but our data is the history. We detect arrivals by watching a vehicle change state across consecutive
 observations, so compaction would throw away precisely the thing we read. And the
 message key puts every observation of one trip into one partition, in order,
 which turns out to be the whole game.""",
@@ -126,21 +122,19 @@ credible because the two halves come from completely different feeds.""",
  9: (36, "AATISH", """Our best lesson came from a feature we deleted. Day of week improved our test
 error by ten seconds, and we removed it anyway. The reason is that Monday
 appeared only in our test window, so thirty-one percent of test rows carried a
-value the model had never seen during training, and those rows quietly inherited
-an adjacent day's correction through wherever the bin boundaries happened to
-fall. The gain was an artifact rather than learned structure. And every real bug
-we hit had that same shape: none of them crashed, and several produced
-better-looking numbers than the correct version.""",
+value the model had never seen in training, so they quietly inherited an adjacent
+day's correction through wherever the bin boundaries fell. The gain was an
+artifact, not learned structure. Every real bug we hit had that shape: none
+crashed, and several produced better-looking numbers than the correct version.""",
      "Pause after 'we removed it anyway' and let the oddity register."),
 
 10: (38, "AATISH", """Our main limitation is coverage, because we catch only about twenty-one
-percent of stop events. Vehicles dwell at a stop for a matter of seconds while we
-sample every two minutes. And it is not random either, since the chance of
-catching a stop scales with how long the vehicle sits there, so terminals and
-layovers end up over-represented and our derived arrivals skew late. That means
-the optimism we measured should be read as an upper bound rather than a point
-estimate. So our next step is deliberately small: one email to 511 requesting a
-higher rate limit, which attacks all three of those problems at once.""",
+percent of stop events, because vehicles dwell for seconds while we sample every
+two minutes. And it is not random, since the chance of catching a stop scales
+with dwell time, so terminals are over-represented and our arrivals skew late.
+That means the optimism we measured is an upper bound, not a point estimate. So
+our next step is deliberately small: one email to 511 requesting a higher rate
+limit, which attacks all three problems at once.""",
      "Being honest about the upper bound is worth marks. Don't soften it."),
 
 11: (12, "EITHER", """All of that runs from a single command, with no API key, in about two minutes,
