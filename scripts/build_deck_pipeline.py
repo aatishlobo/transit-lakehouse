@@ -88,15 +88,15 @@ called every single one of them perfectly on time.""",
  6: (44, "AATISH", """Stage five is Kafka, and we run four topics. Two of them carry the raw feeds,
 predictions and vehicle positions. A third is a dead letter topic for records
 that fail validation, so one malformed row degrades the run rather than stopping
-it. And the fourth carries the arrivals we derive, so anything downstream can
-consume them without touching our code.
+it. The fourth carries the arrivals we derive, so anything downstream can consume
+them without touching our code.
 
 The three data topics get three partitions each, while the dead letter gets one,
 because ordering between unrelated broken records is meaningless. We chose three
 deliberately rather than accepting a default, because partition count is
-effectively permanent: Kafka routes messages by hashing the key against it, so
-adding a partition later re-routes keys and breaks per-trip ordering
-retroactively, for data already written.""",
+effectively permanent: Kafka routes by hashing the key against it, so adding a
+partition later re-routes keys and breaks per-trip ordering retroactively, for
+data already written.""",
      "Name what each topic is FOR. The partition point is the design choice being scored."),
 
  7: (50, "AATISH", """Stage six, and this is the heart of the project. Here is one real vehicle, a
