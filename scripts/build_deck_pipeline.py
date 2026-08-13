@@ -75,7 +75,7 @@ no history endpoint. So we make the irreversible step the cheap one.""",
      "Pause after the last sentence — it is the line people remember."),
 
  5: (48, "BORNA", """Stages three and four. The archive on disk is our system of record, and
-everything downstream reads from it. On the right is one real record as it enters
+everything downstream reads from it. On the left is one real record as it enters
 Kafka, after validation. The key is service date plus trip ID, and the date is in
 there because trip IDs repeat every single day. Now look at arrival uncertainty,
 because it is null rather than zero. Protobuf lets a field be genuinely absent, and
@@ -85,28 +85,31 @@ percent of records carry no delay value, and read the obvious way we would have
 called every single one of them perfectly on time.""",
      "Land 'perfectly on time', pause, then hand over to Aatish."),
 
- 6: (44, "AATISH", """Stage five is Kafka. Four topics, three partitions each, and two of these
-settings are worth explaining. Retention is twenty-four hours, and that is
-deliberate, because Kafka is transport for us rather than storage, and the
-archive Borna just described is what we actually keep. The cleanup policy is
-delete and never compact, because compaction keeps only the newest message per
-key and discards the rest, but our data is the history. We detect arrivals by watching a vehicle change state across consecutive
-observations, so compaction would throw away precisely the thing we read. And the
-message key puts every observation of one trip into one partition, in order,
-which turns out to be the whole game.""",
-     "Ending on the key sets up the next slide directly."),
+ 6: (44, "AATISH", """Stage five is Kafka, and we run four topics. Two of them carry the raw feeds,
+predictions and vehicle positions. A third is a dead letter topic for records
+that fail validation, so one malformed row degrades the run rather than stopping
+it. And the fourth carries the arrivals we derive, so anything downstream can
+consume them without touching our code.
+
+The three data topics get three partitions each, while the dead letter gets one,
+because ordering between unrelated broken records is meaningless. We chose three
+deliberately rather than accepting a default, because partition count is
+effectively permanent: Kafka routes messages by hashing the key against it, so
+adding a partition later re-routes keys and breaks per-trip ordering
+retroactively, for data already written.""",
+     "Name what each topic is FOR. The partition point is the design choice being scored."),
 
  7: (50, "AATISH", """Stage six, and this is the heart of the project. Here is one real vehicle, a
-Powell-Mason cable car, and across four consecutive polls you can watch it
-approach stop four, then report STOPPED_AT at stop four, and then move on to stop
-six. That transition is the arrival, and that sentence exists nowhere in the
-source data. We derived it. The subtlety is that it is the first stopped
-sighting, not the last, because a parked vehicle keeps reporting STOPPED_AT on
-every poll while it waits. So if you took the last one you would be measuring
-departure rather than arrival, and nothing would ever tell you that you had it
-wrong. Which means the resolver has to remember what it saw before, and that is
-exactly why the ordering guarantee matters.""",
-     "The rubric asks for one concrete example. Trace the four lines with your finger."),
+Powell-Mason cable car, across four consecutive polls. The status field comes
+straight from the feed, so when Muni's own equipment reports STOPPED_AT at stop
+four, we are reading that rather than inferring it. What we derive is the
+arrival: the moment that status first appears for that stop. We take the first
+sighting rather than the last, because a parked vehicle keeps reporting stopped
+on every poll, so the last one would measure departure. That derived sentence,
+this trip arrived at stop four at 14:54:31, exists nowhere in the source data,
+and producing it requires the resolver to hold per-trip state, which is exactly
+why the ordering guarantee matters.""",
+     "The read-vs-derived distinction is the point. First-vs-last is now one sentence."),
 
  8: (43, "AATISH", """Stages seven and eight. Now we join our derived arrivals against what the
 agency actually predicted. For that same cable car, two minutes ahead of time
@@ -399,10 +402,9 @@ def build() -> Path:
     xr = MARGIN + Inches(7.3)
     wr = W - MARGIN - xr
     txt(s, xr, y - Inches(0.2), wr, Inches(2.6),
-        "That sentence exists **nowhere**\nin the source data.\n\n"
-        "It is the **first** stopped sighting —\na parked vehicle reports STOPPED_AT\n"
-        "on every poll, so the last one\nwould measure **departure**.\n\n"
-        "So the resolver holds per-trip state —\nwhich is why **ordering** matters.",
+        "**READ from the feed:**\n`current_status` is a published\nGTFS-RT field — we don't infer it.\n\n"
+        "**DERIVED by us:**\nthe arrival — the moment that\nstatus *first* appears for a stop.\n\n"
+        "First, not last: a parked vehicle\nreports it every poll, so the last\nwould be **departure**.",
         size=14, line_spacing=1.32)
     txt(s, MARGIN, y + Inches(2.4), W - 2 * MARGIN, Inches(0.55),
         "Every arrival is stamped with **how** it was derived: method, confidence, "
