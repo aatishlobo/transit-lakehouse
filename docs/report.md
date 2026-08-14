@@ -3,7 +3,7 @@ title: "Real-Time Transit Reliability Lakehouse"
 subtitle: "Deriving arrival times that no agency publishes, and grading the predictions that riders actually see"
 author:
   - Aatish Lobo
-  - Borna [last name]
+  - Borna Karimi
 date: "MSDS 682 --- Data Stream Processing --- Summer 2026"
 geometry: margin=1in
 fontsize: 11pt
@@ -539,9 +539,111 @@ resources are provisioned.
 
 \newpage
 
-# 10. Limitations and failures
+# 10. Optional extension: controlled method comparison
 
-## 10.1 Limitations
+*Submitted as the single labelled extension beyond the required minimum.*
+
+**What it is.** Four methods for predicting the arrival time of a transit
+vehicle, evaluated on **one input, one temporal split, and one named metric**
+(mean absolute error in seconds). Three are baselines; one is the learned model
+described in Section 7.2. The comparison is the point --- a model reported
+without the baselines it must beat is an unfalsifiable claim.
+
+**The four methods.** All predict the same quantity, so the comparison is exact
+rather than approximate:
+
+| Method | Rule |
+|---|---|
+| `baseline_agency` | Trust the agency's published prediction unchanged. Equivalent to predicting a residual of zero. |
+| `baseline_global_bias` | Add one constant --- the mean residual over the training split --- to every prediction. |
+| `baseline_horizon_bias` | Add the mean residual for the prediction's lead-time bucket. A five-row lookup table. |
+| `model` | `HistGradientBoostingRegressor` predicting the residual from seven features, applied as a correction. |
+
+All four are fitted and evaluated on the identical temporal split. The three
+baselines derive their constants from the **training rows only**; computing them
+over the full dataset would let the test set inform its own baseline.
+
+## 10.1 Exact steps
+
+```bash
+make venv && source .venv/bin/activate
+make train
+```
+
+Runtime approximately 10 seconds. **No API key, no Kafka, and no network access
+are required** --- the extension runs from committed data alone and is
+independent of the `make demo` path in Section 9.
+
+**Input:** `ml/data/features_sample.csv.gz` --- 168,160 rows, committed.
+**Saved output:** `ml/artifacts/training_report.json` (metrics, split
+definition, feature decisions) and `ml/artifacts/prediction_correction_model.joblib`.
+Both are included in the submission.
+
+## 10.2 Expected output
+
+The console table and the `results` block of `training_report.json` will contain:
+
+| Method | MAE (s) | RMSE (s) | bias (s) | within 60 s |
+|---|---|---|---|---|
+| `baseline_agency` | 194.7 | 380.9 | -152.3 | 30.9% |
+| `baseline_global_bias` | 215.1 | 358.2 | +80.1 | 14.9% |
+| `baseline_horizon_bias` | 206.3 | 358.9 | +76.1 | 22.6% |
+| **`model`** | **168.5** | **308.9** | **+45.3** | **31.8%** |
+
+**Note on which figures appear where.** These are the numbers a reviewer will
+reproduce, and they come from the **committed sample**. Section 7.2 quotes
+166.6 s, from the full 1.34-million-row local archive, which is 137 MB and too
+large to submit. The 1.9-second gap between the two is the cost of shipping a
+reviewable subset, and it is stated here so that a reproduced 168.5 s reads as
+confirmation rather than contradiction. The full archive can be rebuilt with
+`make features && make train-full` given a 511 key and the raw data.
+
+## 10.3 What the comparison shows
+
+**The model wins: 168.5 s versus 194.7 s, a 13.5 percent reduction against the
+agency's own prediction.**
+
+The more interesting finding is that **both naive bias corrections lose to doing
+nothing.** Section 7.1 establishes that agency predictions are systematically
+optimistic and that the bias grows with lead time. The obvious response is to add
+the measured bias back. Applied directly, that makes predictions *worse* --- 215.1 s
+and 206.3 s against 194.7 s for leaving them alone.
+
+The reason is visible in the residual distribution, computed on the training
+split:
+
+| Lead time | Mean residual | Median residual | Rows |
+|---|---|---|---|
+| 0--2 min | +95 s | +55 s | 5,820 |
+| 2--5 min | +104 s | +72 s | 8,918 |
+| 5--10 min | +134 s | +77 s | 13,984 |
+| 10--20 min | +180 s | +113 s | 24,079 |
+| 20 min+ | +295 s | +174 s | 73,293 |
+
+The mean exceeds the median in every bucket, by a widening margin --- most
+vehicles are moderately late while a minority are severely late, and the tail
+drags the mean well above the typical case. Adding the mean therefore
+overcorrects the ordinary vehicle in order to accommodate the rare one.
+
+This is what the model earns its place by doing. It is not applying a better
+constant; it is learning a correction **conditional** on lead time, hour, route,
+and stop position, so it can add 90 seconds in one context and 250 in another
+where a lookup table must commit to a single value for both.
+
+**Why this extension rather than a larger model.** The comparison is the
+verification method for the AI element required in Section 7.2. Without it the
+model's 168.5 s MAE is a number with nothing to be measured against; with it,
+the model has cleared three explicitly stated alternatives, one of which
+encodes the project's own most prominent finding. The fallback logic in Section
+7.2 depends on this comparison directly: the model is served **only** if it beat
+its best baseline at training time, so this table is not a report on the model,
+it is the gate the model passes through.
+
+\newpage
+
+# 11. Limitations and failures
+
+## 11.1 Limitations
 
 **Coverage.** Approximately 21 percent of stop events are captured, limited by
 the 60 requests/hour quota. Derived arrivals are biased late and over-represent
@@ -564,7 +666,7 @@ with watermarks at production scale.
 version stamp rather than centrally, so a producer could still publish a breaking
 change.
 
-## 10.2 Failures encountered, and what they taught
+## 11.2 Failures encountered, and what they taught
 
 **A mislabelled partition column.** A directory named `service_dt=` was populated
 with the UTC poll date, filing every poll between 17:00 and midnight under the
@@ -598,7 +700,7 @@ version. None crashed. Reviewing the code by reading it would have caught almost
 none of them. What caught them was running against real data and checking output
 against independent measurement.
 
-## 10.3 Deviations from the proposal
+## 11.3 Deviations from the proposal
 
 Both disclosed deliberately.
 
@@ -615,7 +717,7 @@ path and requires no additional data source.
 
 \newpage
 
-# 11. Next steps
+# 12. Next steps
 
 1. **Request a rate-limit increase.** Faster polling attacks coverage,
    one-sided offset, and selection bias simultaneously --- the single highest-value
@@ -629,12 +731,45 @@ path and requires no additional data source.
 5. **Confidence intervals** on model output.
 6. **Windowed join with watermarks**, replacing the in-memory aggregation.
 
-# 12. Contributions
+# 13. Contributions
 
-*[To be completed. Aatish Lobo and Borna [last name] --- split to be documented
-prior to submission.]*
+Two-person team. The split follows the pipeline: **Borna Karimi owned everything
+up to Kafka; Aatish Lobo owned Kafka onwards.** The handoff point is the
+validated event contract, which is the interface between the two halves.
 
-# 13. References and artifacts
+## 13.1 Borna Karimi --- source to contract
+
+| Area | Detail |
+|---|---|
+| Data source | 511 Open Data evaluation, API key acquisition, Data Disseminator Agreement review, and the privacy decision in Section 2.4 |
+| Ingestion | The poller: 120-second cadence, client-side sliding-window rate budget, stale-feed detection, archive-before-decode ordering |
+| Decoding | Presence-aware GTFS-Realtime decoding --- the `HasField` handling in Section 4.2 that distinguishes an absent delay from a zero delay |
+| Archive layout | `ingest_dt` partitioning, and the finding that a single payload spans multiple service dates |
+| Feed profiling | Field-population analysis across operators, which determined that resolver A was viable |
+| Documentation | `DATA_SOURCE.md` |
+
+## 13.2 Aatish Lobo --- contract to result
+
+| Area | Detail |
+|---|---|
+| Event contract | Pydantic models, partition key design, dead-letter routing |
+| Kafka | Topic design, partition count, retention and cleanup policy, idempotent producer, manual offset commits |
+| Streaming | Replay producer, arrival resolver (Section 5), aggregator and the join onto the grain |
+| AI element | Feature construction, temporal split, leakage defences, baselines, model, fallback (Sections 7.2 and 10) |
+| Evaluation | Acceptance-check suite, unit tests, throughput measurement |
+| Documentation | `README.md`, `AI_USAGE.md`, this report |
+
+## 13.3 Shared
+
+Architecture and the correctness invariants in Sections 4 and 5 were designed
+jointly, before implementation, and are recorded in the project's pitfall
+register. Both authors reviewed the other's code, and **both can explain the
+complete path** --- source, contract, Kafka, resolver, aggregation, model, and
+evaluation --- as required by the course collaboration policy.
+
+AI assistance was used by both authors and is disclosed in `AI_USAGE.md`.
+
+# 14. References and artifacts
 
 | Artifact | Location |
 |---|---|

@@ -156,6 +156,8 @@ Code is organised by pipeline stage rather than in a single `src/`:
 | Sample / replay data | `data/replay_sample/` |
 | Pinned dependencies | `requirements.txt` |
 | One run command | `make demo` |
+| Team contributions | `report.pdf` §13 |
+| **Optional extension (bonus)** | **`make train` — see below** |
 
 ---
 
@@ -210,6 +212,53 @@ make evaluate
 Every check carries a **row-count floor** and reports `UNMEASURED` rather than
 `PASS` when handed too little data — a check that passes on an empty table is
 worse than no check.
+
+---
+
+## Optional extension: controlled method comparison
+
+*This is the single labelled extension beyond the required minimum. Full write-up
+in `report.pdf` §10.*
+
+Four methods for predicting a vehicle's arrival, evaluated on **one input, one
+temporal split, one named metric** (MAE in seconds). Three baselines and one
+learned model.
+
+**Exact steps** — no API key, no Kafka, no network. Runs from committed data:
+
+```bash
+make venv && source .venv/bin/activate
+make train
+```
+
+~10 seconds. Input `ml/data/features_sample.csv.gz` (168,160 rows, committed).
+
+**Expected output** — console table, and the same figures saved to
+`ml/artifacts/training_report.json`:
+
+| Method | MAE (s) | RMSE (s) | bias (s) | within 60 s |
+|---|---|---|---|---|
+| trust the agency unchanged | 194.7 | 380.9 | -152.3 | 30.9% |
+| add one global mean residual | 215.1 | 358.2 | +80.1 | 14.9% |
+| add mean residual per lead-time bucket | 206.3 | 358.9 | +76.1 | 22.6% |
+| **learned correction** | **168.5** | **308.9** | **+45.3** | **31.8%** |
+
+**Saved artifacts, both submitted:** `ml/artifacts/training_report.json` (metrics,
+split definition, and every feature accepted or rejected with the reason) and
+`ml/artifacts/prediction_correction_model.joblib`.
+
+**The result worth reading twice:** the model beats the agency by 13.5%, but
+*both naive bias corrections lose to doing nothing.* Residuals are heavily
+right-skewed — at a 20-minute horizon the mean is +295 s while the median is
++174 s — so adding the mean overcorrects the typical vehicle to accommodate the
+rare one. The project's own headline finding, applied naively, makes predictions
+worse. That is precisely why the model learns a *conditional* correction rather
+than a constant.
+
+These figures come from the committed sample. The report's §7.2 quotes 166.6 s
+from the full 1.34 M-row local archive, which is 137 MB and not submitted; the
+1.9 s gap is the cost of shipping a reviewable subset, noted so a reproduced
+168.5 s reads as confirmation.
 
 ---
 

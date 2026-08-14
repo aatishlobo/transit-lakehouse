@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-10T23:21:56.440162+00:00",
+  "generated_at": "2026-08-14T20:32:46.409913+00:00",
   "task": "predict residual = actual_arrival - agency_predicted_arrival",
   "model_type": "HistGradientBoostingRegressor",
   "split": {
