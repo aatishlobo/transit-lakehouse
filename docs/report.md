@@ -50,22 +50,25 @@ Deriving arrivals from the last prediction before a vehicle passes (*prediction
 settlement*) would instead measure the agency against itself and produce a small
 error that means nothing. See Section 7.2.
 
-
 # 2. Data source and classification
+
+
 
 ## 2.1 Source
 
-| | |
-|---|---|
-| Name | 511 SF Bay Open Data, GTFS-Realtime transit feeds |
-| Owner | Metropolitan Transportation Commission (MTC) |
-| Portal | https://511.org/open-data/transit |
-| Format | GTFS-Realtime (Protocol Buffers, proto2) |
-| Coverage | All Bay Area operators, one regional feed (`agency=RG`) |
-| Access | Free API key; 60 requests per 3,600 seconds |
+
+|          |                                                                        |
+| -------- | ---------------------------------------------------------------------- |
+| Name     | 511 SF Bay Open Data, GTFS-Realtime transit feeds                      |
+| Owner    | Metropolitan Transportation Commission (MTC)                           |
+| Portal   | [https://511.org/open-data/transit](https://511.org/open-data/transit) |
+| Format   | GTFS-Realtime (Protocol Buffers, proto2)                               |
+| Coverage | All Bay Area operators, one regional feed (`agency=RG`)                |
+| Access   | Free API key; 60 requests per 3,600 seconds                            |
+
 
 *Data provided by 511.org (Metropolitan Transportation Commission),
-http://www.511.org.* Full schema and rights: `DATA_SOURCE.md`.
+[http://www.511.org](http://www.511.org).* Full schema and rights: `DATA_SOURCE.md`.
 
 ## 2.2 Classification
 
@@ -96,7 +99,6 @@ repository would distribute it with no acceptance secured. The repository is
 **private**, with access granted individually. Section 5(b) attribution appears
 in the README, in `DATA_SOURCE.md`, and programmatically in the output artifacts.
 
-
 # 3. Architecture
 
 ```
@@ -120,6 +122,8 @@ in the README, in `DATA_SOURCE.md`, and programmatically in the output artifacts
                                          v
                             ML correction model ---> corrected ETAs
 ```
+
+
 
 ## 3.1 Two structural decisions
 
@@ -148,23 +152,24 @@ attempt to the rate budget, and redaction of the API key from all logs.
 
 Four topics, created explicitly rather than auto-created:
 
-| Topic | Partitions | Retention | Purpose |
-|---|---|---|---|
-| `gtfsrt.trip_updates.v1` | 3 | 24 h | agency predictions |
-| `gtfsrt.vehicle_positions.v1` | 3 | 24 h | GPS observations |
-| `gtfsrt.dead_letter.v1` | 1 | 7 d | records failing validation |
-| `transit.arrival_events.v1` | 3 | 7 d | derived arrivals |
+
+| Topic                         | Partitions | Retention | Purpose                    |
+| ----------------------------- | ---------- | --------- | -------------------------- |
+| `gtfsrt.trip_updates.v1`      | 3          | 24 h      | agency predictions         |
+| `gtfsrt.vehicle_positions.v1` | 3          | 24 h      | GPS observations           |
+| `gtfsrt.dead_letter.v1`       | 1          | 7 d       | records failing validation |
+| `transit.arrival_events.v1`   | 3          | 7 d       | derived arrivals           |
+
 
 **Partition count was chosen, not defaulted.** Assignment is computed from the
 key hash, so raising the count later changes which partition a key maps to,
 splitting a key's history and breaking ordering retroactively for data already
 written.
 
-**Cleanup policy is `delete`, never `compact`.** Compaction retains only the
+**Cleanup policy is** `delete`**, never** `compact`**.** Compaction retains only the
 latest message per key. These topics are an event log, and the resolver works by
 reading state transitions across consecutive observations, so compaction would
 destroy exactly what it consumes.
-
 
 # 4. The event contract
 
@@ -175,11 +180,13 @@ consumer or being dropped.
 ## 4.1 Why a contract exists
 
 1. **It marks a boundary of ownership.** Once a record is on a topic, any
-   consumer may read it. The contract is the only statement of what they may
+  consumer may read it. The contract is the only statement of what they may
    assume.
 2. **It detects drift.** A field the contract does not declare raises
-   immediately under `extra="forbid"`.
+  immediately under `extra="forbid"`.
 3. **It makes bad records routable rather than fatal.**
+
+
 
 ## 4.2 The invariant the contract must not break
 
@@ -205,16 +212,19 @@ consecutive polls.
 alone would force different days of the same scheduled trip into one partition,
 coupling them and skewing load.
 
-
 # 5. Deriving arrivals
+
+
 
 ## 5.1 Three methods, one implemented
 
-| Method | Signal | Weakness |
-|---|---|---|
-| A, position state | `current_status == STOPPED_AT` at a stop | not published by all operators |
-| B, geofence | nearest approach of GPS trail to stop | measures closest approach, biased early |
-| C, prediction settlement | last prediction before passing | inherits agency error, enables leakage |
+
+| Method                   | Signal                                   | Weakness                                |
+| ------------------------ | ---------------------------------------- | --------------------------------------- |
+| A, position state        | `current_status == STOPPED_AT` at a stop | not published by all operators          |
+| B, geofence              | nearest approach of GPS trail to stop    | measures closest approach, biased early |
+| C, prediction settlement | last prediction before passing           | inherits agency error, enables leakage  |
+
 
 **Method A is implemented.** Method C is effectively unavailable on this feed
 (Section 6.1) and would compromise the evaluation. Method B requires GTFS-Static
@@ -256,7 +266,6 @@ our own code. Storing the method makes that variation filterable, and
 Records that produce no arrival are **counted, not discarded**; the counts are
 the measurement of resolver coverage per operator.
 
-
 # 6. Findings from the live feed
 
 Measured via `profiling/profile_feed.py` and the evaluation harness.
@@ -272,14 +281,14 @@ for both absent and exactly-on-time. Implemented that way, this project would
 have reported 54,638 records as perfectly punctual: a fabricated on-time spike,
 plausible in appearance, corrupting every downstream metric.
 
-**Only 15 of 28 operators publish `current_status`**, which method A requires.
+**Only 15 of 28 operators publish** `current_status`, which method A requires.
 Muni populates it 99.2% of the time; Caltrain, 0%.
 
 **Settled predictions are effectively unavailable.** Only 4 of 28 operators emit
 `uncertainty = 0`, at negligible volume. Muni never publishes uncertainty at all,
 reconfirmed when model training dropped the column as entirely absent.
 
-**Seven operators revisit the same `stop_id` within a trip** (Emery Go-Round: 23
+**Seven operators revisit the same** `stop_id` **within a trip** (Emery Go-Round: 23
 of 29 trips), which is why the grain is `(service_date, trip_id, stop_sequence)`.
 
 **A single payload spans multiple service dates.** One poll held trips dated
@@ -294,12 +303,12 @@ of captured stop events appear in exactly one poll** and capture is about **21%*
 of stop events. Three distinct effects, which must not be conflated:
 
 1. **Coverage.** Most stop events are missed. A sample-size limit, not an
-   accuracy one.
+  accuracy one.
 2. **One-sided offset.** A vehicle is observable as `STOPPED_AT` only between
-   arriving and departing, so a derived timestamp falls at or after true arrival,
+  arriving and departing, so a derived timestamp falls at or after true arrival,
    never before. Derived arrivals are biased **late**.
 3. **Selection bias.** Capture probability scales with dwell time, so terminals,
-   layovers, and timepoints are over-represented. Median observed dwell among
+  layovers, and timepoints are over-represented. Median observed dwell among
    multi-poll sightings is 353 seconds.
 
 Effects 2 and 3 both push measured arrivals later, making agencies appear more
@@ -309,15 +318,19 @@ optimistic than they may be. **Every bias figure here is an upper bound.**
 
 # 7. Results
 
+
+
 ## 7.1 Prediction accuracy (SF Muni, 25,501 prediction-arrival pairs)
 
-| lead time | n | bias (s) | median abs err (s) | p90 (s) | within 60 s | within 180 s |
-|---|---|---|---|---|---|---|
-| 0-2 min | 509 | -11 | 13 | 52 | 92.7% | 100.0% |
-| 2-5 min | 4,603 | -46 | 50 | 112 | 59.5% | 98.4% |
-| 5-10 min | 4,897 | -66 | 70 | 172 | 43.3% | 91.2% |
-| 10-20 min | 8,919 | -98 | 102 | 257 | 31.1% | 77.0% |
-| 20+ min | 6,573 | -142 | 146 | 375 | 23.0% | 59.3% |
+
+| lead time | n     | bias (s) | median abs err (s) | p90 (s) | within 60 s | within 180 s |
+| --------- | ----- | -------- | ------------------ | ------- | ----------- | ------------ |
+| 0-2 min   | 509   | -11      | 13                 | 52      | 92.7%       | 100.0%       |
+| 2-5 min   | 4,603 | -46      | 50                 | 112     | 59.5%       | 98.4%        |
+| 5-10 min  | 4,897 | -66      | 70                 | 172     | 43.3%       | 91.2%        |
+| 10-20 min | 8,919 | -98      | 102                | 257     | 31.1%       | 77.0%        |
+| 20+ min   | 6,573 | -142     | 146                | 375     | 23.0%       | 59.3%        |
+
 
 **Short-horizon predictions are excellent:** under two minutes out, median error
 is 13 seconds and 92.7% land within a minute. **Accuracy degrades steadily with
@@ -342,12 +355,14 @@ which makes the baseline comparison exact.
 **Model.** `HistGradientBoostingRegressor`, seven features, 1,008,746 training
 rows, 336,529 test rows, split **strictly forward in time**.
 
-| | MAE (s) | RMSE (s) | bias (s) | within 60 s |
-|---|---|---|---|---|
-| baseline: trust the agency | 195.2 | 381.9 | -154.0 | 31.0% |
-| baseline: add global mean | 215.1 | 358.2 | +78.5 | 14.8% |
-| baseline: add mean per horizon | 206.7 | 359.2 | +74.8 | 22.4% |
-| **model** | **166.6** | **305.6** | **+43.7** | **32.1%** |
+
+|                                | MAE (s)   | RMSE (s)  | bias (s)  | within 60 s |
+| ------------------------------ | --------- | --------- | --------- | ----------- |
+| baseline: trust the agency     | 195.2     | 381.9     | -154.0    | 31.0%       |
+| baseline: add global mean      | 215.1     | 358.2     | +78.5     | 14.8%       |
+| baseline: add mean per horizon | 206.7     | 359.2     | +74.8     | 22.4%       |
+| **model**                      | **166.6** | **305.6** | **+43.7** | **32.1%**   |
+
 
 **14.7% lower error than the agency's own prediction**, beating all three
 baselines, with per-horizon improvement from 12.5% (20+ min) to 19.9% (5-10 min).
@@ -362,24 +377,27 @@ obscured. Using an agency forecast as a feature is normally leakage; it is
 legitimate here because **labels come from VehiclePositions and features from
 TripUpdates**, so the label cannot contain the feature.
 
-- **`lead_time` is excluded.** Defined as `actual_arrival - issued`, it contains
-  the target and is unknowable until the vehicle has arrived. It would produce a
-  spectacular score and an unusable model. Asserted by test.
+- `lead_time` **is excluded.** Defined as `actual_arrival - issued`, it contains
+the target and is unknowable until the vehicle has arrived. It would produce a
+spectacular score and an unusable model. Asserted by test.
 - **The split is temporal, not random.** Random splitting leaks twice: one trip
-  contributes many rows that scatter across both sides, and later observations
-  would train a model tested on earlier ones.
+contributes many rows that scatter across both sides, and later observations
+would train a model tested on earlier ones.
 - **A feature that improved the score was removed.** Day-of-week cut MAE by 10
-  seconds (156.8 s versus 166.6 s) but `dow = 0` occurred only in the test
-  window, so 31.2% of test rows carried a value the model had never seen and
-  inherited an adjacent day's correction through bin placement. The gain was an
-  artifact. The reported 166.6 s is the honest figure.
+seconds (156.8 s versus 166.6 s) but `dow = 0` occurred only in the test
+window, so 31.2% of test rows carried a value the model had never seen and
+inherited an adjacent day's correction through bin placement. The gain was an
+artifact. The reported 166.6 s is the honest figure.
 - **Fallback, enforced in code.** The unmodified agency prediction is served when
-  no artifact exists, when the model failed to beat its best baseline at training
-  time, or when input falls outside the trained range. The baseline is the
-  default; the model is an override that must earn its place on every retrain.
+no artifact exists, when the model failed to beat its best baseline at training
+time, or when input falls outside the trained range. The baseline is the
+default; the model is an override that must earn its place on every retrain.
+
 
 
 # 8. Evaluation and validation evidence
+
+
 
 ## 8.1 Acceptance checks
 
@@ -387,14 +405,16 @@ TripUpdates**, so the label cannot contain the feature.
 pipeline actually produced, as distinct from unit tests, which verify functions
 on imagined inputs.
 
-| Check | Result |
-|---|---|
-| `null_zero_discrimination` | 408,149 rows against raw protobuf, **0 violations** |
-| `contract_validation` | 245,701 valid, 0 invalid |
-| `grain_uniqueness` | 6,046 arrivals, 6,046 distinct keys |
-| `idempotent_resolution` | two independent runs, bit-for-bit identical |
-| `provenance_complete` | 0 missing fields |
-| `event_time_not_ingest_time` | 0 collisions with processing time |
+
+| Check                        | Result                                              |
+| ---------------------------- | --------------------------------------------------- |
+| `null_zero_discrimination`   | 408,149 rows against raw protobuf, **0 violations** |
+| `contract_validation`        | 245,701 valid, 0 invalid                            |
+| `grain_uniqueness`           | 6,046 arrivals, 6,046 distinct keys                 |
+| `idempotent_resolution`      | two independent runs, bit-for-bit identical         |
+| `provenance_complete`        | 0 missing fields                                    |
+| `event_time_not_ingest_time` | 0 collisions with processing time                   |
+
 
 The first is the strongest artifact: it re-parses the raw protobuf and compares
 field presence against decoded output rather than trusting the decoder's account
@@ -418,11 +438,14 @@ redaction, and 13 tests dedicated to ML leakage defences.
 
 ## 8.3 Pipeline throughput
 
-| Stage | Volume | Time |
-|---|---|---|
-| Replay producer | 1,668,118 rows, 0 dead-lettered | 77 s |
-| Arrival resolver | 38,701 positions to 6,046 arrivals | 16 s |
-| Full `make demo` | cold start to passing checks | 2 min 15 s |
+
+| Stage            | Volume                             | Time       |
+| ---------------- | ---------------------------------- | ---------- |
+| Replay producer  | 1,668,118 rows, 0 dead-lettered    | 77 s       |
+| Arrival resolver | 38,701 positions to 6,046 arrivals | 16 s       |
+| Full `make demo` | cold start to passing checks       | 2 min 15 s |
+
+
 
 
 # 9. Review path
@@ -460,12 +483,14 @@ Four methods for predicting a vehicle's arrival, on **one input, one temporal
 split, one named metric** (MAE in seconds): three baselines and the model from
 Section 7.2.
 
-| Method | Rule |
-|---|---|
-| `baseline_agency` | Trust the published prediction unchanged. Equivalent to a residual of zero. |
-| `baseline_global_bias` | Add one constant, the mean residual over the training split. |
+
+| Method                  | Rule                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| `baseline_agency`       | Trust the published prediction unchanged. Equivalent to a residual of zero.           |
+| `baseline_global_bias`  | Add one constant, the mean residual over the training split.                          |
 | `baseline_horizon_bias` | Add the mean residual for the prediction's lead-time bucket. A five-row lookup table. |
-| `model` | `HistGradientBoostingRegressor` predicting the residual from seven features. |
+| `model`                 | `HistGradientBoostingRegressor` predicting the residual from seven features.          |
+
 
 All four use the identical split. The baselines derive their constants from
 **training rows only**; using the full dataset would let the test set inform its
@@ -490,12 +515,14 @@ are submitted.
 
 Printed to console and written to the `results` block of `training_report.json`:
 
-| Method | MAE (s) | RMSE (s) | bias (s) | within 60 s |
-|---|---|---|---|---|
-| `baseline_agency` | 194.7 | 380.9 | -152.3 | 30.9% |
-| `baseline_global_bias` | 215.1 | 358.2 | +80.1 | 14.9% |
-| `baseline_horizon_bias` | 206.3 | 358.9 | +76.1 | 22.6% |
-| **`model`** | **168.5** | **308.9** | **+45.3** | **31.8%** |
+
+| Method                  | MAE (s)   | RMSE (s)  | bias (s)  | within 60 s |
+| ----------------------- | --------- | --------- | --------- | ----------- |
+| `baseline_agency`       | 194.7     | 380.9     | -152.3    | 30.9%       |
+| `baseline_global_bias`  | 215.1     | 358.2     | +80.1     | 14.9%       |
+| `baseline_horizon_bias` | 206.3     | 358.9     | +76.1     | 22.6%       |
+| `model`                 | **168.5** | **308.9** | **+45.3** | **31.8%**   |
+
 
 **Which figures appear where.** These come from the committed sample and are what
 a reviewer reproduces. Section 7.2 quotes 166.6 s, from the full 1.34-million-row
@@ -514,13 +541,15 @@ optimistic and that the bias grows with lead time; the obvious response is to ad
 that bias back. Applied directly it makes predictions worse, 215.1 s and 206.3 s
 against 194.7 s for leaving them alone. The training-split residuals show why:
 
-| Lead time | Mean residual | Median residual | Rows |
-|---|---|---|---|
-| 0-2 min | +95 s | +55 s | 5,820 |
-| 2-5 min | +104 s | +72 s | 8,918 |
-| 5-10 min | +134 s | +77 s | 13,984 |
-| 10-20 min | +180 s | +113 s | 24,079 |
-| 20 min+ | +295 s | +174 s | 73,293 |
+
+| Lead time | Mean residual | Median residual | Rows   |
+| --------- | ------------- | --------------- | ------ |
+| 0-2 min   | +95 s         | +55 s           | 5,820  |
+| 2-5 min   | +104 s        | +72 s           | 8,918  |
+| 5-10 min  | +134 s        | +77 s           | 13,984 |
+| 10-20 min | +180 s        | +113 s          | 24,079 |
+| 20 min+   | +295 s        | +174 s          | 73,293 |
+
 
 The mean exceeds the median in every bucket by a widening margin. Most vehicles
 are moderately late while a minority are severely late, and the tail drags the
@@ -539,23 +568,27 @@ best baseline at training time. The table is the gate, not a report.
 
 # 11. Limitations and failures
 
+
+
 ## 11.1 Limitations
 
 - **Coverage.** About 21% of stop events, limited by the 60 requests/hour quota.
-  Derived arrivals are biased late and over-represent long-dwell stops
-  (Section 6.2), so reported bias is an upper bound.
+Derived arrivals are biased late and over-represent long-dwell stops
+(Section 6.2), so reported bias is an upper bound.
 - **Scope.** One operator (SF Muni), six days, no seasonal, holiday, or weather
-  variation.
+variation.
 - **Model coverage.** 95.8% of training data falls in hours 14-19, because the
-  machine hosting the archiver sleeps overnight. Effectively an afternoon and
-  evening model.
+machine hosting the archiver sleeps overnight. Effectively an afternoon and
+evening model.
 - **No confidence intervals.** Point estimates only.
 - **In-memory join.** The aggregator joins across the full replay window in
-  memory, honest for a bounded 39-minute replay but requiring a windowed join
-  with watermarks at production scale.
+memory, honest for a bounded 39-minute replay but requiring a windowed join
+with watermarks at production scale.
 - **No Schema Registry.** Compatibility rests on Pydantic contracts and a version
-  stamp rather than central enforcement, so a producer could still publish a
-  breaking change.
+stamp rather than central enforcement, so a producer could still publish a
+breaking change.
+
+
 
 ## 11.2 Failures encountered
 
@@ -598,19 +631,20 @@ Kubernetes consequently fall outside the delivered scope.
 requires GTFS-Static and an as-of join against a slowly-changing dimension. The
 delivered metric exercises the identical streaming path with no extra source.
 
-
 # 12. Next steps
 
 1. **Request a rate-limit increase.** Faster polling attacks coverage, one-sided
-   offset, and selection bias at once. The highest-value improvement available.
+  offset, and selection bias at once. The highest-value improvement available.
 2. **GTFS-Static integration** for true on-time performance, via an SCD2 schedule
-   dimension and as-of join.
+  dimension and as-of join.
 3. **Additional operators**, beginning with VTA, which showed strong resolver A
-   availability.
+  availability.
 4. **Geofence resolver (method B)** for the 13 operators where method A cannot
-   fire, calibrated against A where both are available.
+  fire, calibrated against A where both are available.
 5. **Confidence intervals** on model output.
 6. **Windowed join with watermarks**, replacing the in-memory aggregation.
+
+
 
 # 13. Contributions
 
@@ -620,25 +654,33 @@ contract.
 
 ## 13.1 Borna Karimi, source to contract
 
-| Area | Detail |
-|---|---|
-| Data source | 511 evaluation, API key acquisition, Disseminator Agreement review, the privacy decision in Section 2.4 |
-| Ingestion | The poller: 120-second cadence, client-side rate budget, stale-feed detection, archive-before-decode ordering |
-| Decoding | Presence-aware GTFS-Realtime decoding, the `HasField` handling in Section 4.2 |
-| Archive layout | `ingest_dt` partitioning, and the finding that a payload spans multiple service dates |
-| Feed profiling | Field-population analysis establishing that resolver A was viable |
-| Documentation | `DATA_SOURCE.md` |
+
+| Area           | Detail                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------- |
+| Data source    | 511 evaluation, API key acquisition, Disseminator Agreement review, the privacy decision in Section 2.4       |
+| Ingestion      | The poller: 120-second cadence, client-side rate budget, stale-feed detection, archive-before-decode ordering |
+| Decoding       | Presence-aware GTFS-Realtime decoding, the `HasField` handling in Section 4.2                                 |
+| Archive layout | `ingest_dt` partitioning, and the finding that a payload spans multiple service dates                         |
+| Feed profiling | Field-population analysis establishing that resolver A was viable                                             |
+| Documentation  | `DATA_SOURCE.md`                                                                                              |
+
+
+
 
 ## 13.2 Aatish Lobo, contract to result
 
-| Area | Detail |
-|---|---|
-| Event contract | Pydantic models, partition key design, dead-letter routing |
-| Kafka | Topic design, partition count, retention and cleanup policy, idempotent producer, manual offset commits |
-| Streaming | Replay producer, arrival resolver (Section 5), aggregator and the join onto the grain |
-| AI element | Feature construction, temporal split, leakage defences, baselines, model, fallback (Sections 7.2 and 10) |
-| Evaluation | Acceptance-check suite, unit tests, throughput measurement |
-| Documentation | `README.md`, `AI_USAGE.md`, this report |
+
+| Area           | Detail                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------------------- |
+| Event contract | Pydantic models, partition key design, dead-letter routing                                               |
+| Kafka          | Topic design, partition count, retention and cleanup policy, idempotent producer, manual offset commits  |
+| Streaming      | Replay producer, arrival resolver (Section 5), aggregator and the join onto the grain                    |
+| AI element     | Feature construction, temporal split, leakage defences, baselines, model, fallback (Sections 7.2 and 10) |
+| Evaluation     | Acceptance-check suite, unit tests, throughput measurement                                               |
+| Documentation  | `README.md`, `AI_USAGE.md`, this report                                                                  |
+
+
+
 
 ## 13.3 Shared
 
@@ -649,16 +691,18 @@ model, evaluation. AI assistance is disclosed in `AI_USAGE.md`.
 
 # 14. References and artifacts
 
-| Artifact | Location |
-|---|---|
-| Source data documentation | `DATA_SOURCE.md` |
-| AI usage disclosure | `AI_USAGE.md` |
-| Onboarding guide | `docs/ONBOARDING.md` |
-| Pitfall register (60 items) | `docs/PITFALLS.md` |
-| Daily build reports | `docs/reports/` |
-| Model training report | `ml/artifacts/training_report.json` |
-| Acceptance check results | `evaluation/acceptance_report.json` |
-| Produced metrics | `outputs/` |
+
+| Artifact                    | Location                            |
+| --------------------------- | ----------------------------------- |
+| Source data documentation   | `DATA_SOURCE.md`                    |
+| AI usage disclosure         | `AI_USAGE.md`                       |
+| Onboarding guide            | `docs/ONBOARDING.md`                |
+| Pitfall register (60 items) | `docs/PITFALLS.md`                  |
+| Daily build reports         | `docs/reports/`                     |
+| Model training report       | `ml/artifacts/training_report.json` |
+| Acceptance check results    | `evaluation/acceptance_report.json` |
+| Produced metrics            | `outputs/`                          |
+
 
 **Data source:** 511 SF Bay Open Data, Metropolitan Transportation Commission.
-Data provided by 511.org, http://www.511.org
+Data provided by 511.org, [http://www.511.org](http://www.511.org)
