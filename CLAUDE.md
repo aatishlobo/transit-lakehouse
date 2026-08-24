@@ -132,59 +132,62 @@ original spec.)
 
 ## 4. Current state
 
-**Built, tested, runnable: the ingest floor only.** ~1,400 lines, 11 passing
-tests.
+**Built, tested, runnable: the full vertical, ingest to dashboard.**
 
 ```
 ingest/poller/decode.py     presence-aware GTFS-RT decoding    <- correctness core
 ingest/poller/poller.py     fetch, archive-first, rate budget, stale detection
-profiling/profile_feed.py   Week 0 evidence generator -> ADR-002
-tests/test_decode.py        11 tests; absent-vs-zero is critical
-tests/make_fixture.py       synthetic two-agency archive, no API key needed
-docs/PITFALLS.md            full 60-item register, tiered by severity
+ingest/static/fetch_static.py  511 GTFS-Static, content-addressed archive
+streaming/                  Pydantic contracts, Kafka producer/consumer, resolver
+spark/session.py            UTC, Delta, pinned retention, one metastore
+spark/bronze.py             archive -> Delta, reuses decode.py unmodified
+spark/silver.py             typed, deduped, quality-flagged
+spark/gold.py               fct_stop_arrival, idempotent MERGE on the grain
+spark/scheduled_time.py     GTFS noon-minus-12h arithmetic (pitfall 3.6)
+spark/dim_schedule.py       SCD2 schedule dimension
+spark/fct_otp.py            as-of join -> true on-time performance
+dbt/                        4 models, 17 tests
+orchestration/definitions.py Dagster asset graph + 3 asset checks
+serving/                    FastAPI + dashboard over an exported SQLite
+k8s/                        Strimzi, KEDA, CronJob, single-replica poller
+ml/                         prediction-correction model (168.5s vs 194.7s MAE)
 ```
 
-**Not started:** Kafka, Spark, Delta, SCD2 dimension, dbt, Dagster, K8s, serving.
+**Test counts:** 97 in the ingest venv (83 + 14 scheduled-time), 19 in the
+Spark venv (13 lakehouse + 6 SCD2), 17 dbt tests.
 
-**Why ingest shipped alone** — this ordering is deliberate, don't "fix" it:
-1. GTFS-RT history cannot be re-fetched. The archive clock is the only one
-   running; every hour without a poller is permanently lost training data.
-2. The Kafka/Avro schema should be designed against *observed* field population.
-   Designing it now means evolving it under BACKWARD compatibility by week three.
-3. The decoder is inherited by every later layer. An absent-vs-zero bug
-   propagates through bronze → silver → gold → dbt → dashboard → ML labels and
-   never throws.
+**Measured on the current lake:** 36,753 arrivals across 13 agencies, 3,867,322
+schedule rows, 99.5% as-of join match rate, ~49.6% on-time overall.
 
-**Environment note:** `protobuf` is pinned `>=6.32,<7.0`. Not arbitrary — mlflow,
-databricks-sdk, and opentelemetry-proto all cap below 7.0, and databricks-sdk
-additionally excludes 6.30.0/6.30.1/6.31.0. Presence semantics verified identical
-on 6.33.6 and 7.34.1. Use the isolated venv (`make venv`); this service has no
-reason to share an environment with the ML stack.
+**Two environments, deliberately.** `.venv` is Python 3.13 for ingest/serving
+and keeps the protobuf pin. `.venv-spark` is Python 3.12 + JDK 21 for
+Spark 4/Delta 4/dbt/Dagster. Do not merge them.
 
----
+**Not started:** DE#5's Flink consumer, MLE#1's online service, A/B layer,
+RAG assistant. Spark reads are batch; the Structured Streaming read is the next
+increment, and bronze was kept deliberately dumb so its checkpoint can survive
+that change.
 
-## 5. Immediate next step — a hard gate
+## 5. Immediate next step
 
-**Run the poller ~3 hours across a service peak, then `make profile`.** Two
-decisions are blocked on that output and cannot be made from a spec:
+The Week 0 gate is **closed**. The feed profile was run, resolver A confirmed
+(15 of 28 operators publish `current_status`; Muni 99.2%, Caltrain 0%), and the
+grain confirmed on `stop_sequence` (7 operators revisit a `stop_id` within one
+trip). Findings live in section 6 of `docs/report.md`.
 
-- **Q1/Q2 → the resolver ladder.** If `current_status` is populated regionally,
-  resolver A leads and labels are relatively clean. If not, we're on C or B and
-  the leakage risk in §7.3 becomes live rather than theoretical.
-- **Q7 → confirms the grain.** Strong prior on `stop_sequence`, but it should be
-  evidence, not assertion.
+**Now open, in priority order:**
 
-Also answered: `schedule_relationship` distribution (exclusion rules), fan-out
-ratio (storage sizing), feed freshness vs. poll cadence.
-
-Output becomes `docs/decisions/ADR-002-feed-profile.md`.
-
-**Parallel, non-blocking:** request a 511 rate limit increase. Default is 60
-req/hr, which caps polling at one cycle per 120s with two feed types. Poll
-cadence directly quantizes every arrival label — ±120s against a signal that's
-typically 2–5 minutes. It's an email round-trip; starting it late blocks later.
-
----
+1. **Request a 511 rate-limit increase.** Still the highest-value single
+   change: 60 req/hour caps polling at 120s, and that one constraint drives
+   coverage (~21%), timestamp precision, and selection bias toward long dwells
+   simultaneously. It is an email.
+2. **Collect a second GTFS-Static snapshot.** The SCD2 dimension has exactly one
+   version, so its versioning is proven only by unit tests, not by production
+   data. A second snapshot makes the as-of join demonstrably load-bearing.
+3. **Switch the Spark reads to Structured Streaming.** Bronze was written dumb
+   and stable precisely so its checkpoint can survive the change.
+4. **Benchmark against MTC's stop-observation dataset** (section 10) to convert
+   "no ground truth" into "agrees with a reference implementation to within X".
 
 ## 6. Roadmap
 
