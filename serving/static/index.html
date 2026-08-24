@@ -1,0 +1,154 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bay Area Transit Reliability</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:#fbfbfa; --fg:#1a1a19; --muted:#6b6a67; --line:#e4e2dd;
+    --card:#fff; --good:#2f7d5d; --mid:#b8860b; --bad:#b4462f; --accent:#2f5d7d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#191918; --fg:#eeedeb; --muted:#a3a19c; --line:#33322f;
+            --card:#212120; --good:#5bbd8f; --mid:#d9a441; --bad:#e0765a; --accent:#7db4d9; }
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  .wrap { max-width:960px; margin:0 auto; padding:32px 20px 64px }
+  h1 { font-size:1.6rem; margin:0 0 4px; letter-spacing:-.01em }
+  .sub { color:var(--muted); margin:0 0 20px }
+  .banner { padding:10px 14px; border-radius:8px; margin-bottom:20px; font-size:.9rem; border:1px solid var(--line) }
+  .fresh { background:color-mix(in srgb, var(--good) 12%, transparent); border-color:var(--good) }
+  .stale { background:color-mix(in srgb, var(--bad) 12%, transparent); border-color:var(--bad) }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; margin-bottom:18px }
+  h2 { font-size:1rem; margin:0 0 12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted) }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums }
+  th,td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--line) }
+  th:first-child,td:first-child { text-align:left }
+  th { color:var(--muted); font-weight:600; font-size:.8rem }
+  .bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; min-width:60px }
+  .bar>i { display:block; height:100% }
+  .g{background:var(--good)} .m{background:var(--mid)} .b{background:var(--bad)}
+  .caveat { font-size:.85rem; color:var(--muted); border-left:3px solid var(--line); padding-left:12px }
+  .hours { display:flex; gap:3px; align-items:flex-end; height:110px; margin-top:8px }
+  .hours div { flex:1; background:var(--accent); border-radius:2px 2px 0 0; position:relative; min-height:2px }
+  .hlab { display:flex; gap:3px; font-size:.65rem; color:var(--muted); margin-top:4px }
+  .hlab span { flex:1; text-align:center }
+  footer { color:var(--muted); font-size:.8rem; margin-top:28px; border-top:1px solid var(--line); padding-top:14px }
+  .err { color:var(--bad) }
+</style>
+
+<div class="wrap">
+  <h1>Bay Area Transit Reliability</h1>
+  <p class="sub">On-time performance derived from vehicle positions, not from agency predictions.</p>
+
+  <div id="banner" class="banner">Loading…</div>
+
+  <div class="card">
+    <h2>On-time performance by operator</h2>
+    <div id="agencies">Loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>On-time performance by hour <span style="text-transform:none;font-weight:400">(local time)</span></h2>
+    <div id="hours">Loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>Least reliable routes</h2>
+    <div id="worst">Loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>How to read these numbers</h2>
+    <p class="caveat" id="caveat">Loading…</p>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const pct = v => (v == null ? "—" : v.toFixed(1) + "%");
+const cls = v => v >= 60 ? "g" : v >= 45 ? "m" : "b";
+const bar = v => `<div class="bar"><i class="${cls(v)}" style="width:${Math.max(0,Math.min(100,v))}%"></i></div>`;
+
+async function get(p) {
+  const r = await fetch(p);
+  if (!r.ok) throw new Error(p + " -> " + r.status);
+  return r.json();
+}
+
+function banner(f) {
+  const el = document.getElementById("banner");
+  if (!f || f.age_hours == null) {
+    el.className = "banner stale";
+    el.textContent = "Data freshness unknown. Treat these figures as historical.";
+    return;
+  }
+  const age = f.age_hours < 48
+    ? `${f.age_hours.toFixed(1)} hours`
+    : `${(f.age_hours / 24).toFixed(1)} days`;
+  // Staleness is always stated, never implied by absence. An unlabelled stale
+  // dashboard reads as a broken product.
+  if (f.is_stale) {
+    el.className = "banner stale";
+    el.innerHTML = `<strong>Snapshot, not live.</strong> Newest observation is ${age} old
+      (last arrival ${f.last_arrival_utc} UTC). The ingest pipeline is ephemeral;
+      this page serves the most recent export.`;
+  } else {
+    el.className = "banner fresh";
+    el.innerHTML = `<strong>Current.</strong> Newest observation ${age} old.`;
+  }
+}
+
+(async () => {
+  try {
+    const [ag, hr, wr, meta] = await Promise.all([
+      get("/api/agencies"), get("/api/otp-by-hour"),
+      get("/api/worst-routes?limit=12"), get("/api/meta"),
+    ]);
+    banner(ag.freshness);
+
+    document.getElementById("agencies").innerHTML = `<table>
+      <tr><th>Operator</th><th>Arrivals</th><th>Median delay</th><th>Early</th><th>Late</th><th>On time</th><th style="width:120px"></th></tr>
+      ${ag.agencies.map(a => `<tr>
+        <td><strong>${a.agency}</strong></td>
+        <td>${a.n_arrivals.toLocaleString()}</td>
+        <td>${a.median_delay_s > 0 ? "+" : ""}${a.median_delay_s}s</td>
+        <td>${pct(a.early_pct)}</td>
+        <td>${pct(a.late_pct)}</td>
+        <td><strong>${pct(a.on_time_pct)}</strong></td>
+        <td>${bar(a.on_time_pct)}</td></tr>`).join("")}
+    </table>`;
+
+    const hrs = hr.hours;
+    const max = Math.max(...hrs.map(h => h.on_time_pct), 1);
+    document.getElementById("hours").innerHTML =
+      `<div class="hours">${hrs.map(h =>
+        `<div style="height:${(h.on_time_pct / max) * 100}%" title="${h.hour_local}:00 — ${pct(h.on_time_pct)} on time, n=${h.n_arrivals}"></div>`
+      ).join("")}</div>
+       <div class="hlab">${hrs.map(h => `<span>${h.hour_local}</span>`).join("")}</div>`;
+
+    document.getElementById("worst").innerHTML = `<table>
+      <tr><th>#</th><th>Operator</th><th>Route</th><th>Arrivals</th><th>Median</th><th>Late</th><th>On time</th></tr>
+      ${wr.routes.map(r => `<tr>
+        <td>${r.worst_rank}</td><td>${r.agency}</td>
+        <td>${r.route_id.replace(/^[A-Z]+:/, "")}</td>
+        <td>${r.n_arrivals.toLocaleString()}</td>
+        <td>${r.median_delay_s > 0 ? "+" : ""}${r.median_delay_s}s</td>
+        <td>${pct(r.late_pct)}</td><td><strong>${pct(r.on_time_pct)}</strong></td></tr>`).join("")}
+    </table>`;
+
+    document.getElementById("caveat").textContent = meta.known_bias;
+    document.getElementById("foot").innerHTML =
+      `${meta.n_arrivals.toLocaleString()} arrivals over ${meta.n_service_days} service days,
+       resolved via ${meta.arrival_method}, sampled every ${meta.poll_interval_s}s.<br>${meta.attribution}`;
+  } catch (e) {
+    // Degrade to an explicit failure rather than an empty page.
+    document.getElementById("banner").className = "banner stale";
+    document.getElementById("banner").innerHTML =
+      `<strong>Unavailable.</strong> ${e.message}. The API may not have marts exported yet.`;
+    for (const id of ["agencies","hours","worst","caveat"])
+      document.getElementById(id).innerHTML = '<span class="err">no data</span>';
+  }
+})();
+</script>

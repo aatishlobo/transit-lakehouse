@@ -65,3 +65,6 @@ data/static/
 dbt/target/
 dbt/dbt_packages/
 dbt/logs/
+
+# Exported serving artifact; rebuilt by `make serve-export`
+serving/data/
