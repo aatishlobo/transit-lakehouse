@@ -50,116 +50,116 @@ the agency's own ETA.
 
 ---
 
-## Quick start
-
-**Requires:** Python 3.11+, Docker running. **No API key needed.**
-
-```bash
-make venv && source .venv/bin/activate
-make demo
-```
-
-`make demo` starts Kafka, replays 39 minutes of real archived transit data
-(1.67 M records), derives arrivals, produces metrics, and runs acceptance
-checks — about **2 minutes 15 seconds** cold.
-
-Expected output ends with:
-
-```
-passed=6  failed=0  unmeasured=0  info=1
-```
-
-Results land in `outputs/`; validation evidence in `evaluation/`.
-
-### Other commands
-
-```bash
-make test          # 83 unit tests (~2s)
-make evaluate      # acceptance checks only
-make train         # retrain the ML model from committed data
-make predict       # demo one corrected ETA
-make kafka-down    # stop Kafka
-make poll-bg       # start the live archiver (needs a 511 key)
-make poll-status
-```
-
----
-
 ## Architecture
 
 ```
-511 GTFS-Realtime  ──▶  poller  ──▶  data/raw/     [archive: the system of record]
-   (protobuf)                            │
-                                         ▼
-                            replay producer ──▶ Pydantic contract
-                                         │            │ invalid
-                                         ▼            ▼
-                                   Kafka topics    dead-letter
-                                         │
-                        ┌────────────────┴────────────────┐
-                        ▼                                 ▼
-                 arrival resolver                  prediction stream
-              (STOPPED_AT transitions)                     │
-                        │                                  │
-                        └──────────────┬───────────────────┘
-                                       ▼
-                                  aggregator ──▶ outputs/  [metrics]
-                                       │
-                                       ▼
-                              ML correction model ──▶ corrected ETAs
+                     511 regional GTFS-Realtime          511 GTFS-Static
+                     (protobuf, 60 req/hour)             (68 MB zip)
+                              |                                |
+                    poller (exactly 1 replica)      fetch_static (content-addressed)
+                    archive-before-decode                       |
+                              v                                 |
+                    data/raw/  [SYSTEM OF RECORD]        data/static/
+                              |                                 |
+              +---------------+---------------+                 |
+              v                               v                 |
+     Pydantic contract                 spark/bronze             |
+              |                        decode + explode         |
+              v                               v                 v
+        Kafka topics  -> resolver      Delta bronze      spark/dim_schedule
+        (24h, delete)     |                  v            SCD2, 3.87M rows
+                          |            Delta silver              |
+                          |                  v                   |
+                          +--------> gold/fct_stop_arrival       |
+                                     idempotent MERGE            |
+                                            |                    |
+                                            +----> AS-OF JOIN <--+
+                                                        v
+                                              gold/fct_stop_otp
+                                                        v
+                                                 dbt marts (17 tests)
+                                                        v
+                                          SQLite export -> FastAPI + dashboard
+
+        orchestrated by Dagster (dbt is an ASSET EDGE, not a schedule offset)
 ```
 
-**The archive is the system of record, not Kafka.** Topics expire after 24 hours
-deliberately; GTFS-Realtime has no history endpoint, so anything not archived is
-lost permanently. Replay always runs from disk.
+**Prediction accuracy vs on-time performance.** These are different questions and
+the project answers both. *Prediction accuracy* compares the derived arrival to
+what the agency predicted; it needs only the realtime feeds. *On-time
+performance* compares the derived arrival to the published timetable, which
+requires GTFS-Static, an SCD2 dimension, and an as-of join so a trip resolves
+against the schedule that was in force on its service date.
 
-**Live and replay share one code path.** The poller only ever writes to disk;
-everything downstream only ever reads from disk. They differ solely in whether
-new files keep appearing — so a reviewer exercises the real pipeline.
+**Three structural decisions**
 
----
+| Decision | Rejected alternative | Cost |
+|---|---|---|
+| Archive is the system of record; Kafka is transport with 24h retention | Kafka as durable storage | Replay needed to rebuild topics |
+| Arrivals from vehicle positions only (resolver A) | Prediction settlement, far better coverage | ~21% capture, only 15 of 28 operators |
+| SCD2 dimension + as-of join | Join to the current schedule | A dimension that grows, and a slower join |
+
+The third is the one that looks like over-engineering and is not: joining facts
+to the *current* schedule silently recomputes every historical number each time
+an agency republishes a timetable.
+
+## Quick start
+
+Two environments, deliberately separate. Spark 4 needs Java 17+ and Python
+<=3.12; the ingest service is 3.13 and pins protobuf for the ML stack.
+
+```bash
+make venv          # ingest + serving      (python3, protobuf pinned)
+make venv-spark    # Spark/Delta/dbt/Dagster (python3.12 + JDK 21)
+```
+
+**The local Kafka demo** (no API key, deterministic replay):
+
+```bash
+make demo          # replay -> Kafka -> resolver -> metrics -> checks
+```
+
+**The lakehouse**, from the archive through to the dashboard:
+
+```bash
+make static        # fetch GTFS-Static (needs API_511_KEY)
+make full          # bronze -> silver -> gold -> dim -> otp -> marts -> export
+make serve         # dashboard on http://localhost:8000
+```
+
+**Tests**
+
+```bash
+make test          # 97 tests: decode, contracts, resolver, ML leakage, DST
+make lake-test     # 19 tests: lakehouse invariants + SCD2 semantics
+make dbt-test      # 17 dbt tests
+make k8s-validate  # manifests parse
+```
 
 ## Repository layout
 
-Code is organised by pipeline stage rather than in a single `src/`:
+Organised by pipeline stage rather than a single `src/`:
 
 | Path | Contents |
 |---|---|
 | `ingest/poller/decode.py` | presence-aware GTFS-RT decoding — **the correctness core** |
 | `ingest/poller/poller.py` | fetch, archive-first, rate budget, stale detection |
-| `streaming/contracts.py` | Pydantic event contracts, partition key |
-| `streaming/producer.py` | archive → Kafka replay producer |
-| `streaming/consumer.py` | arrival resolver |
-| `streaming/aggregator.py` | prediction-accuracy metrics |
+| `ingest/static/` | 511 GTFS-Static fetch, content-addressed archive |
+| `streaming/` | Pydantic contracts, Kafka producer/consumer, resolver, aggregator |
+| `spark/session.py` | UTC, Delta, pinned retention, one shared metastore |
+| `spark/bronze.py` | archive → Delta; reuses `decode.py` unmodified |
+| `spark/silver.py` | typed, deduplicated, quality-flagged |
+| `spark/gold.py` | `fct_stop_arrival`, idempotent MERGE on the grain |
+| `spark/scheduled_time.py` | GTFS noon-minus-12h arithmetic; both DST transitions |
+| `spark/dim_schedule.py` | SCD2 schedule dimension |
+| `spark/fct_otp.py` | as-of join → true on-time performance |
+| `dbt/` | 4 models, 17 tests, marts for serving |
+| `orchestration/definitions.py` | Dagster assets + asset checks |
+| `serving/` | SQLite export, FastAPI, dashboard |
+| `k8s/` | Strimzi, KEDA, CronJob, single-replica poller |
 | `ml/` | feature build, training, inference for the AI element |
 | `evaluation/` | acceptance checks |
-| `tests/` | 83 unit tests |
-| `profiling/` | Week-0 feed profiler |
-| `scripts/` | poller supervisor, replay-sample generator |
-| `data/replay_sample/` | 13 MB committed sample — the offline review path |
-| `outputs/` | produced metrics |
-| `docs/` | onboarding, pitfall register, daily build reports |
-
-### Course requirement → location
-
-| Requirement | Where |
-|---|---|
-| Data source documented | `DATA_SOURCE.md` |
-| Validated event contract | `streaming/contracts.py`, `tests/test_contracts.py` |
-| Producer / replay script | `streaming/producer.py` |
-| Kafka topics | `docker-compose.yml` (4 topics) |
-| Consumer / stream processor | `streaming/consumer.py`, `streaming/aggregator.py` |
-| Useful output | `outputs/` — 4 CSVs + summary JSON |
-| Validation / evaluation | `evaluation/run_acceptance_checks.py` |
-| Repeatable tests | `tests/` — 83 tests |
-| Bounded AI element | `ml/`, documented in `AI_USAGE.md` |
-| Sample / replay data | `data/replay_sample/` |
-| Pinned dependencies | `requirements.txt` |
-| One run command | `make demo` |
-| Team contributions | `report.pdf` §13 |
-| **Optional extension (bonus)** | **`make train` — see below** |
-
----
+| `tests/` | 116 tests across two interpreters |
 
 ## Correctness: what this project is actually about
 
