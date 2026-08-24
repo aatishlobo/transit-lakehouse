@@ -26,14 +26,21 @@ Then stop. Let them pick the thread.
 
 | Layer | State | Evidence |
 |---|---|---|
-| Ingest / poller | **built**, running 19 days | 4,874 polls, 1.2 GB, unfetchable history |
+| Ingest / poller | **built**, 19 days running | 4,874 polls, 1.2 GB, unfetchable history |
 | Presence-aware decoder | **built** | 44.2% of records carry no delay value |
 | Kafka path | **built** | 4 topics, contracts, resolver, dead-letter |
-| Spark bronze/silver/gold | **built** | medallion on Delta, 96 tests total |
-| Gold `fct_stop_arrival` | **built** | idempotent MERGE, 36,753 arrivals, 13 agencies |
+| Spark bronze/silver/gold on Delta | **built** | idempotent MERGE, 36,753 arrivals, 13 agencies |
+| GTFS-Static ingest | **built** | 68 MB regional feed, content-addressed |
+| SCD2 schedule dimension | **built** | 3,867,322 rows, versioned on schedule attributes |
+| As-of join, true OTP | **built** | 99.5% match, join conservation asserted |
+| dbt marts | **built** | 4 models, 17 tests passing |
+| Dagster asset graph | **built** | 8 assets, 3 asset checks, dbt as an asset edge |
+| FastAPI + dashboard | **built** | SQLite export, labels its own staleness |
+| Kubernetes manifests | **written, not deployed** | Strimzi, KEDA, single-replica poller |
 | ML correction model | **built** | 168.5 s MAE vs 194.7 s agency baseline |
-| SCD2 schedule dimension, dbt | **designed, not built** | needs GTFS-Static ingestion |
-| Dagster, Kubernetes | **designed, not built** | sequenced last, deliberately |
+
+**Be precise about K8s:** the manifests exist and encode real decisions, but
+nothing has been deployed to a cluster. Say that plainly.
 
 ### The numbers worth memorising
 
@@ -42,13 +49,14 @@ Then stop. Let them pick the thread.
   perfectly punctual.
 - **15 of 28** operators publish `current_status`. Muni 99.2%, Caltrain 0%.
 - **~21%** of stop events captured, because the quota caps polling at 120 s.
-- **85.7%** of captured arrivals appear in exactly one poll.
 - **3.7%** of arrivals carry a vehicle timestamp *ahead* of the poll that saw
   them, by up to 97 s. Vehicle clock skew.
-- **36,753** arrivals across **13** agencies in the Delta gold table.
+- **36,753** arrivals, **13** agencies, **3.87 M** schedule rows.
+- **99.5%** as-of join match rate, with join conservation asserted not reported.
+- **49.6%** on-time overall; AC Transit worst at 32.9%, 40.7% more than 5 min late.
+- **26%** of arrivals are more than a minute EARLY -- and since labels are
+  biased late, the true figure is higher.
 - **13.5%** MAE improvement over the agency's own ETA (168.5 s vs 194.7 s).
-
----
 
 ## 3. The four stories to steer toward
 
@@ -122,48 +130,60 @@ whose test values are absent from training is dropped, with the reason logged.
 
 ---
 
-## 4. The unbuilt layers — answer honestly, it is stronger
+## 4. The three decisions most worth volunteering
 
-Do **not** improvise detail about systems you have not run. The credible answer
-names the design, the sequencing reason, and the specific thing that made it
-last. Use this shape:
+### DST, and the bug I wrote and then caught
 
-> *"That one's designed but not built yet. Here's the design, and here's why I
-> sequenced it where I did."*
+GTFS measures times from **noon minus 12 hours** of the service day, not from
+midnight -- because noon is never ambiguous while midnight can be skipped or
+repeated by a DST transition. My first implementation subtracted a `timedelta`
+from an aware datetime, which is *wall-clock* arithmetic inside the zone and
+collapses straight back to naive local midnight. Every scheduled time on a
+transition day was an hour off, in **opposite directions** for spring-forward
+and fall-back, which is why testing one transition would not have caught it.
 
-**Dagster.**
-> Not built yet. The design that matters is one edge: dbt must not run in the
-> middle of a static ingest, so it's modelled as an **asset dependency**, not a
-> schedule offset. Two crons that happen not to overlap today will overlap the
-> first time ingest runs long, and you get a silent partial read. I sequenced
-> orchestration late because there's little to orchestrate until the SCD2
-> dimension exists.
+Fix: convert to UTC first, then subtract. 14 tests pin both 2026 transitions,
+past-midnight times like `25:14:00`, and the 23/24/25-hour service days.
 
-**Kubernetes.**
-> Not deployed. The design decision I'd defend is that the **poller is exactly
-> one replica** — it's not a Kafka consumer, it has no lag, and N replicas
-> means N times the API calls against a rate-limited source. Consumers scale on
-> lag via KEDA, capped at partition count. Scaling the poller is the mistake
-> that's easy to make and expensive to undo.
+### The as-of join, and why `is_current` is the wrong join key
 
-**SCD2 schedule dimension and dbt.**
-> This is the piece I most want to build, and it's the real remaining work.
-> Today I measure *prediction accuracy* — actual versus what the agency
-> predicted. True on-time performance needs actual versus **scheduled**, which
-> means ingesting GTFS-Static, versioning it as a slowly-changing dimension,
-> and doing an as-of join so a trip resolves against the schedule that was in
-> force on that service date. Joining against the current schedule is the
-> classic error: it silently rewrites history every time an agency publishes a
-> new timetable.
+Agencies republish timetables constantly. Joining facts to the *current*
+schedule silently recomputes every historical OTP number every time a new feed
+lands -- last month's figures change, nothing errors, and the metric becomes
+unauditable. So the dimension is SCD2 with tiling validity windows and the join
+predicate is `valid_from <= as_of < valid_to`.
 
-**Spark Structured Streaming vs batch.**
-> The medallion tables are built and the jobs are Spark. The streaming
-> read is the next increment — the reason it isn't there yet is that a
-> streaming checkpoint couples to the query plan, so I kept bronze
-> deliberately dumb and stable and put every piece of logic that might still
-> change into silver and gold.
+The as-of instant is the **start of the trip's service day**, not the arrival
+timestamp, so a trip running past midnight resolves against its own service
+day's schedule.
 
----
+I also had to make an honest call: I began fetching GTFS-Static after the
+realtime archive was already running, so no observed schedule version covers
+the earlier dates. The first version is seeded at epoch, and every row carries
+`valid_from_assumed` so any analysis that cannot tolerate the assumption can
+filter it out. Stating uncertainty in the data beats burying it in a README.
+
+### Join conservation as an assertion, not a metric
+
+The as-of join is a LEFT join whose output row count is **asserted** equal to
+the input. An inner join would silently drop every arrival whose trip is
+missing from the schedule -- and those absences are not random, they
+concentrate in added and unscheduled service, which is the service most likely
+to be late. The metric would improve because the inconvenient rows vanished.
+
+A changed row count also detects the other failure: two open dimension versions
+for one key, which duplicates facts. That is why the SCD2 test asserting exactly
+one current version per key exists.
+
+### If asked about Kubernetes
+
+> The manifests are written but nothing is deployed. The decision I'd defend is
+> that the **poller is exactly one replica**, with `strategy: Recreate` and a
+> PodDisruptionBudget so a rolling update can't briefly run two. It's not a
+> Kafka consumer -- no group, no partitions, no lag to divide -- so a second
+> replica doesn't add throughput, it doubles API calls against a 60/hour quota
+> and gets the token throttled. Consumers scale on lag via KEDA, capped at the
+> partition count, because replica four would hold no assignment.
 
 ## 5. Likely questions
 
