@@ -23,7 +23,11 @@ RETENTION_PROPERTIES = {
 }
 
 
-def build(app_name: str, shuffle_partitions: int = 8) -> SparkSession:
+def build(
+    app_name: str,
+    shuffle_partitions: int = 8,
+    driver_memory: str | None = None,
+) -> SparkSession:
     """Local SparkSession with Delta enabled.
 
     shuffle_partitions defaults low because this runs on one laptop against a
@@ -37,6 +41,12 @@ def build(app_name: str, shuffle_partitions: int = 8) -> SparkSession:
     # inside a job rather than at session construction.
     os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
     os.environ.setdefault("PYSPARK_DRIVER_PYTHON", sys.executable)
+
+    # In local mode the driver IS the executor, so the 1 GB default heap has to
+    # hold every shuffle. It must be set before the JVM launches -- passing it
+    # to an already-running SparkContext is silently ignored, which is why an
+    # OOM here looks like a code problem rather than a config one.
+    mem = driver_memory or os.environ.get("SPARK_DRIVER_MEMORY", "4g")
 
     builder = (
         SparkSession.builder.appName(app_name)
@@ -61,6 +71,9 @@ def build(app_name: str, shuffle_partitions: int = 8) -> SparkSession:
         # value is unexpected.
         .config("spark.sql.sources.partitionOverwriteMode", "static")
         .config("spark.sql.shuffle.partitions", str(shuffle_partitions))
+        .config("spark.driver.memory", mem)
+        .config("spark.driver.maxResultSize", "2g")
+        .config("spark.sql.adaptive.enabled", "true")
         # Parsing legacy/ambiguous datetimes should raise, not guess.
         .config("spark.sql.legacy.timeParserPolicy", "EXCEPTION")
     )

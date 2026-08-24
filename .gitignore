@@ -56,3 +56,7 @@ lake/
 spark-warehouse/
 metastore_db/
 derby.log
+
+# GTFS-Static archive: 68MB zips + 275MB extracted. Rebuildable via
+# ingest.static.fetch_static, and it is 511 Provided Data (Agreement 2(c)).
+data/static/
