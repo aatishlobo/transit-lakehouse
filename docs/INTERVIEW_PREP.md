@@ -115,6 +115,13 @@ New, from the Spark build: **3.7% of arrivals have a vehicle clock ahead of our
 poll clock**, up to 97 seconds. A fourth bias source, and one I did not
 anticipate — it came out of a test I wrote expecting zero violations.
 
+And from the OTP join: **26% of arrivals are more than a minute early.**
+Because the labels are biased *late*, the true early rate is higher still.
+That is schedule padding, and it matters because an early bus is a worse
+failure than a late one -- you miss it entirely. It is why every mart reports
+early and late separately rather than folding them into one "off-schedule"
+number.
+
 ### Story 4: I deleted a feature that improved the score
 
 Day-of-week cut MAE by 10 seconds. It was removed anyway: over a six-day
