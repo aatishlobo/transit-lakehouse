@@ -1,0 +1,67 @@
+# The poller. EXACTLY ONE REPLICA, permanently.
+#
+# It is not a Kafka consumer: no group, no partitions, no lag. A second replica
+# does not add throughput, it doubles API calls against a 60 req/hour quota and
+# gets the token throttled -- which halts archiving, and GTFS-Realtime history
+# cannot be re-fetched. Minutes lost are lost permanently.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: poller
+  namespace: transit
+spec:
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: a rolling update briefly runs two pods, and
+    # two pollers is precisely the failure mode this file exists to prevent.
+    type: Recreate
+  selector:
+    matchLabels: {app: poller}
+  template:
+    metadata:
+      labels: {app: poller}
+    spec:
+      containers:
+        - name: poller
+          image: transit-lakehouse/poller:latest
+          args: ["-m", "ingest.poller.poller"]
+          env:
+            - name: API_511_KEY
+              valueFrom:
+                secretKeyRef: {name: transit-511, key: API_511_KEY}
+            - name: POLL_INTERVAL_S
+              value: "120"
+          volumeMounts:
+            - {name: archive, mountPath: /data}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits:   {cpu: 500m, memory: 512Mi}
+          livenessProbe:
+            # Liveness is archive freshness, not process liveness. A poller
+            # whose HTTP client has wedged is still "running" and still useless.
+            exec:
+              command: ["python", "-m", "ingest.poller.healthcheck", "--max-age-s", "600"]
+            initialDelaySeconds: 120
+            periodSeconds: 60
+      volumes:
+        - name: archive
+          persistentVolumeClaim: {claimName: archive-pvc}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: poller-pdb, namespace: transit}
+spec:
+  # Allow the pod to be evicted (maxUnavailable 1) but never duplicated.
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app: poller}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: {name: archive-pvc, namespace: transit}
+spec:
+  accessModes: [ReadWriteOnce]
+  # The archive is the system of record and is unrecoverable. Sized for growth,
+  # and deliberately NOT a scratch volume.
+  resources:
+    requests: {storage: 200Gi}

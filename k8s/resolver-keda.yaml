@@ -1,0 +1,43 @@
+# Arrival resolver, scaled on CONSUMER LAG.
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: arrival-resolver, namespace: transit}
+spec:
+  replicas: 0
+  selector:
+    matchLabels: {app: arrival-resolver}
+  template:
+    metadata:
+      labels: {app: arrival-resolver}
+    spec:
+      containers:
+        - name: resolver
+          image: transit-lakehouse/streaming:latest
+          args: ["-m", "streaming.consumer"]
+          env:
+            - {name: KAFKA_BOOTSTRAP, value: "transit-kafka-bootstrap:9092"}
+          resources:
+            requests: {cpu: 200m, memory: 512Mi}
+            limits:   {cpu: "1", memory: 1Gi}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: {name: arrival-resolver, namespace: transit}
+spec:
+  scaleTargetRef: {name: arrival-resolver}
+  minReplicaCount: 0
+  # Capped at the PARTITION COUNT. Partitions are the unit of parallelism in a
+  # consumer group; a fourth replica would be assigned nothing and idle
+  # forever while still costing a pod.
+  maxReplicaCount: 3
+  cooldownPeriod: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: transit-kafka-bootstrap:9092
+        consumerGroup: arrival-resolver-v1
+        topic: gtfsrt.vehicle-positions.v1
+        # Lag, not CPU. A consumer that is behind is not necessarily busy -- it
+        # may be blocked on a slow write, in which case CPU scaling scales the
+        # wrong signal and does nothing.
+        lagThreshold: "1000"

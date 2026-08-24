@@ -2,7 +2,9 @@
         profile profile-json fixture profile-fixture clean clean-archive \
         kafka-up kafka-down kafka-topics kafka-logs replay-sample \
         replay resolve aggregate evaluate demo demo-clean features train predict \
-        venv-spark bronze silver gold lake lake-test lake-clean
+        venv-spark bronze silver gold lake lake-test lake-clean \
+        static dim otp dbt-run dbt-test marts serve-export serve \
+        dagster-ui dagster-run k8s-validate full
 
 # Use the isolated venv explicitly rather than whatever `python` resolves to.
 # This service pins protobuf <7.0 for compatibility with the ML stack; picking
@@ -119,6 +121,8 @@ predict:            ## demo one corrected ETA
 # turns into a broken Spark install.
 
 PY_SPARK := .venv-spark/bin/python
+PY_SPARK_BIN := .venv-spark/bin
+PWD := $(shell pwd)
 JAVA_HOME ?= /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
 LAKE_ROOT ?= lake
 BRONZE_FILES ?= 120
@@ -154,6 +158,55 @@ demo-clean:         ## demo from a torn-down Kafka -- use this for a live demo
 	@echo "tearing down Kafka so the run starts from empty topics..."
 	-@$(MAKE) --no-print-directory kafka-down
 	@$(MAKE) --no-print-directory demo
+
+# ---- Schedule dimension + OTP -------------------------------------------
+
+static:             ## fetch + archive 511 GTFS-Static (counts against the quota)
+	$(PY) -m ingest.static.fetch_static
+
+dim:                ## GTFS-Static -> SCD2 dim_stop_schedule
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.dim_schedule --lake-root $(LAKE_ROOT)
+
+otp:                ## as-of join arrivals to the schedule in force -> fct_stop_otp
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.fct_otp --lake-root $(LAKE_ROOT)
+
+# ---- dbt ----------------------------------------------------------------
+# Run from the repo root, never `cd dbt`: dbt chdirs into --project-dir, and
+# anything resolving relative to the process CWD (Derby, relative paths) then
+# lands somewhere different from the Spark jobs.
+
+dbt-run:
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK_BIN)/dbt run --project-dir dbt --profiles-dir dbt
+
+dbt-test:
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK_BIN)/dbt test --project-dir dbt --profiles-dir dbt
+
+marts: dbt-run dbt-test
+
+# ---- Serving ------------------------------------------------------------
+
+serve-export:       ## marts -> compact SQLite for the always-on API
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m serving.export_marts
+
+serve:              ## run the dashboard + API (no Spark needed)
+	$(PY) -m uvicorn serving.api:app --reload --port 8000
+
+# ---- Orchestration ------------------------------------------------------
+
+dagster-ui:         ## asset graph in a browser
+	JAVA_HOME=$(JAVA_HOME) DAGSTER_HOME=$(PWD)/.dagster_home PYTHONPATH=$(PWD) \
+	  $(PY_SPARK_BIN)/dagster dev -m orchestration.definitions
+
+dagster-run:        ## materialise the whole graph
+	JAVA_HOME=$(JAVA_HOME) DAGSTER_HOME=$(PWD)/.dagster_home PYTHONPATH=$(PWD) \
+	  $(PY_SPARK_BIN)/dagster job execute -j daily_refresh -m orchestration.definitions
+
+k8s-validate:
+	$(PY) -c "import yaml,glob; [list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/*.yaml')]; print('manifests parse OK')"
+
+# The whole lakehouse, in dependency order. Kafka path is separate (`make demo`).
+full: lake dim otp marts serve-export
+	@echo "lakehouse rebuilt. `make serve` to view."
 
 # ---- Replay sample ------------------------------------------------------
 

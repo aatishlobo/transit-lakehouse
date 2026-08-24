@@ -68,3 +68,7 @@ dbt/logs/
 
 # Exported serving artifact; rebuilt by `make serve-export`
 serving/data/
+
+# Dagster local instance
+.dagster_home/
+.tmp_dagster_home_*/

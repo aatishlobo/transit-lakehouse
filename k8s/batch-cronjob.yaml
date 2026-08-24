@@ -1,0 +1,42 @@
+# The batch graph, as ONE CronJob invoking Dagster.
+#
+# Deliberately not one CronJob per layer with staggered times. Offset schedules
+# encode an assumption that each stage finishes before the next begins, and
+# that assumption fails silently the first time ingest runs long: dbt reads a
+# half-written dimension and produces marts that are wrong without erroring.
+# Ordering belongs to the asset graph.
+apiVersion: batch/v1
+kind: CronJob
+metadata: {name: lakehouse-refresh, namespace: transit}
+spec:
+  schedule: "0 4 * * *"
+  # A long-running job must never overlap its next trigger.
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: dagster
+              image: transit-lakehouse/batch:latest
+              args: ["dagster", "job", "execute", "-j", "daily_refresh",
+                     "-m", "orchestration.definitions"]
+              env:
+                - name: API_511_KEY
+                  valueFrom:
+                    secretKeyRef: {name: transit-511, key: API_511_KEY}
+              resources:
+                requests: {cpu: "1", memory: 6Gi}
+                limits:   {cpu: "3", memory: 8Gi}
+              volumeMounts:
+                - {name: archive, mountPath: /data}
+                - {name: marts, mountPath: /app/serving/data}
+          volumes:
+            - name: archive
+              persistentVolumeClaim: {claimName: archive-pvc}
+            - name: marts
+              persistentVolumeClaim: {claimName: marts-pvc}
