@@ -47,3 +47,12 @@ files.zip
 
 # Built submission archives -- regenerate with scripts/build_submission.sh
 final_project_*.zip
+
+# Spark/Delta stack (separate interpreter + JDK)
+.venv-spark/
+
+# Derived lakehouse. Rebuildable from data/raw; never the system of record.
+lake/
+spark-warehouse/
+metastore_db/
+derby.log

@@ -1,7 +1,8 @@
 .PHONY: venv install test poll-once poll poll-bg poll-status poll-stop \
         profile profile-json fixture profile-fixture clean clean-archive \
         kafka-up kafka-down kafka-topics kafka-logs replay-sample \
-        replay resolve aggregate evaluate demo demo-clean features train predict
+        replay resolve aggregate evaluate demo demo-clean features train predict \
+        venv-spark bronze silver gold lake lake-test lake-clean
 
 # Use the isolated venv explicitly rather than whatever `python` resolves to.
 # This service pins protobuf <7.0 for compatibility with the ML stack; picking
@@ -109,6 +110,45 @@ train-full:         ## train on the full local archive (not shipped)
 
 predict:            ## demo one corrected ETA
 	$(PY) -m ml.predict
+
+# ---- Lakehouse: Spark Structured Streaming -> Delta ---------------------
+#
+# Deliberately a SEPARATE venv and interpreter from the ingest service. Spark 4
+# needs Java 17+ and Python <=3.12; the ingest venv is 3.13 with a protobuf pin
+# that exists for the ML stack. Sharing one environment is how a protobuf pin
+# turns into a broken Spark install.
+
+PY_SPARK := .venv-spark/bin/python
+JAVA_HOME ?= /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
+LAKE_ROOT ?= lake
+BRONZE_FILES ?= 120
+
+venv-spark:         ## Spark/Delta venv (python3.12 + JDK 21)
+	/opt/homebrew/bin/python3.12 -m venv .venv-spark && \
+	  .venv-spark/bin/pip -q install --upgrade pip && \
+	  .venv-spark/bin/pip -q install pyspark==4.0.0 delta-spark==4.0.0 \
+	    'gtfs-realtime-bindings>=1.0' 'protobuf>=6.32,<7.0' pytest
+	@echo "spark venv ready. JDK: $(JAVA_HOME)"
+
+bronze:             ## archive -> Delta bronze (decode + explode, dumb and stable)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.bronze \
+	  --data-root $(DATA_ROOT) --lake-root $(LAKE_ROOT) --limit-files $(BRONZE_FILES)
+
+silver:             ## bronze -> Delta silver (typed, deduped, flagged)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.silver --lake-root $(LAKE_ROOT)
+
+gold:               ## silver -> Delta gold fct_stop_arrival (idempotent MERGE)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.gold --lake-root $(LAKE_ROOT)
+
+lake: bronze silver gold   ## full medallion build from the live archive
+
+lake-test:          ## lakehouse invariant tests (needs a built lake)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m pytest tests/test_lakehouse.py -q
+
+# Drops the DERIVED lake only. The archive in $(DATA_ROOT) is untouched and
+# every table here is rebuildable from it.
+lake-clean:
+	rm -rf $(LAKE_ROOT)
 
 demo-clean:         ## demo from a torn-down Kafka -- use this for a live demo
 	@echo "tearing down Kafka so the run starts from empty topics..."
