@@ -1,0 +1,22 @@
+name: transit_lakehouse
+version: "1.0.0"
+config-version: 2
+profile: transit_lakehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  transit_lakehouse:
+    +file_format: delta
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table
+
+vars:
+  # Absolute so dbt's chdir into the project dir cannot change what it reads.
+  lake_root: "/Users/aatishlobo/Desktop/transit-lakehouse/lake"

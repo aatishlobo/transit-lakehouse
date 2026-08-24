@@ -1,0 +1,63 @@
+version: 2
+
+models:
+  - name: stg_stop_otp
+    description: >
+      Serving-boundary staging. The single point where UTC becomes
+      America/Los_Angeles (invariant 3.5).
+    columns:
+      - name: trip_id
+        tests: [not_null]
+      - name: stop_sequence
+        tests: [not_null]
+      - name: delay_s
+        tests: [not_null]
+      - name: hour_local
+        description: Local hour. In UTC this would be shifted 7-8 hours.
+        tests:
+          - accepted_values:
+              values: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]
+              quote: false
+      - name: arrival_method
+        description: Provenance. Only resolver A is implemented today.
+        tests:
+          - accepted_values: {values: ['stopped_at']}
+    tests:
+      # Invariant 3.2: the grain, asserted in dbt as well as in Spark. A test
+      # that lives in only one place stops being run the moment someone builds
+      # the table another way.
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [service_date, trip_id, stop_sequence]
+
+  - name: mart_otp_by_agency
+    description: Headline reliability per operator, early and late separated.
+    columns:
+      - name: agency
+        tests: [not_null, unique]
+      - name: on_time_pct
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100}
+      - name: n_arrivals
+        tests:
+          - dbt_utils.accepted_range: {min_value: 100}
+
+  - name: mart_otp_by_route_hour
+    columns:
+      - name: hour_local
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 23}
+      - name: on_time_pct
+        tests:
+          - dbt_utils.accepted_range: {min_value: 0, max_value: 100}
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns: [agency, route_id, hour_local]
+
+  - name: mart_worst_routes
+    columns:
+      - name: worst_rank
+        tests: [not_null, unique]
+      - name: n_arrivals
+        description: Floor enforced in the model; a leaderboard on noise is worthless.
+        tests:
+          - dbt_utils.accepted_range: {min_value: 50}

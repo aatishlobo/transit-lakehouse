@@ -81,6 +81,10 @@ def build_otp(spark: SparkSession, lake_root: str = "lake") -> tuple[DataFrame, 
         F.col("valid_from"),
         F.col("valid_to"),
         F.col("feed_sha256"),
+        # Carried through to the marts: rows resolved against a schedule
+        # version whose start date we assumed rather than observed must remain
+        # identifiable all the way to the serving layer.
+        F.col("valid_from_assumed"),
     )
 
     joined = facts.join(

@@ -1,0 +1,27 @@
+# Session method: dbt runs inside a local SparkSession rather than against a
+# thrift server, so a model cannot pass in dbt and behave differently in the
+# Spark jobs.
+#
+# server_side_parameters is the only reliable way to configure that session --
+# dbt-spark builds it in-process, so SPARK_CONF_DIR / spark-defaults.conf are
+# not consulted. These MUST mirror spark/session.py, especially:
+#   catalogImplementation=hive  (else the catalog is in-memory and empty)
+#   session.timeZone=UTC        (invariant 3.5)
+transit_lakehouse:
+  target: local
+  outputs:
+    local:
+      type: spark
+      method: session
+      schema: transit
+      host: localhost
+      server_side_parameters:
+        spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
+        spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
+        spark.jars: "/Users/aatishlobo/.ivy2.5.2/jars/io.delta_delta-spark_2.13-4.0.0.jar,/Users/aatishlobo/.ivy2.5.2/jars/io.delta_delta-storage-4.0.0.jar,/Users/aatishlobo/.ivy2.5.2/jars/org.antlr_antlr4-runtime-4.13.1.jar"
+        spark.sql.catalogImplementation: hive
+        spark.sql.warehouse.dir: "/Users/aatishlobo/Desktop/transit-lakehouse/spark-warehouse"
+        spark.hadoop.javax.jdo.option.ConnectionURL: "jdbc:derby:;databaseName=/Users/aatishlobo/Desktop/transit-lakehouse/metastore_db;create=true"
+        spark.sql.session.timeZone: UTC
+        spark.sql.shuffle.partitions: "16"
+        spark.driver.memory: 4g

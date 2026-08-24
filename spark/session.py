@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parent.parent
 
 from delta import configure_spark_with_delta_pip
 from pyspark.sql import SparkSession
@@ -76,6 +79,25 @@ def build(
         .config("spark.sql.adaptive.enabled", "true")
         # Parsing legacy/ambiguous datetimes should raise, not guess.
         .config("spark.sql.legacy.timeParserPolicy", "EXCEPTION")
+        # One metastore for every entry point. Spark defaults the Derby
+        # metastore to the PROCESS's working directory, so a job launched from
+        # repo root and a dbt run launched from dbt/ silently get separate
+        # catalogs -- tables registered by one are invisible to the other.
+        # Without a Hive catalog Spark uses an IN-MEMORY one: CREATE DATABASE
+        # appears to succeed, the table is queryable in that session, and the
+        # whole catalog evaporates on exit. The failure looks like a metastore
+        # path problem and is not one.
+        .config("spark.sql.catalogImplementation", "hive")
+        .config("spark.sql.warehouse.dir", str(_REPO / "spark-warehouse"))
+        # Hive settings reach the metastore only via the `spark.hadoop.`
+        # prefix. Unprefixed, this key is silently ignored and Derby falls back
+        # to the PROCESS's working directory -- so a job run from repo root and
+        # a dbt run (which chdirs into its project dir) get different catalogs
+        # and neither reports a problem.
+        .config(
+            "spark.hadoop.javax.jdo.option.ConnectionURL",
+            f"jdbc:derby:;databaseName={_REPO / 'metastore_db'};create=true",
+        )
     )
     # The `delta-spark` pip package ships only the Python API; the JVM classes
     # arrive as a Maven coordinate. Without this, spark.sql.extensions above
