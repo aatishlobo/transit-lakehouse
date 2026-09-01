@@ -127,6 +127,8 @@ PWD := $(shell pwd)
 JAVA_HOME ?= /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
 LAKE_ROOT ?= lake
 BRONZE_FILES ?= 120
+# gold only needs vehicle_positions; trip_updates feeds the Kafka metrics path.
+FEED ?= vehicle_positions
 
 venv-spark:         ## Spark/Delta venv (python3.12 + JDK 21)
 	/opt/homebrew/bin/python3.12 -m venv .venv-spark && \
@@ -140,7 +142,7 @@ bronze:             ## archive -> Delta bronze (decode + explode, dumb and stabl
 	  --data-root $(DATA_ROOT) --lake-root $(LAKE_ROOT) --limit-files $(BRONZE_FILES)
 
 silver:             ## bronze -> Delta silver (typed, deduped, flagged)
-	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.silver --lake-root $(LAKE_ROOT)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.silver --feed $(FEED) --lake-root $(LAKE_ROOT)
 
 gold:               ## silver -> Delta gold fct_stop_arrival (idempotent MERGE)
 	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.gold --lake-root $(LAKE_ROOT)

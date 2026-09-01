@@ -1,0 +1,15 @@
+# Serving tier only. No Spark, no JVM, no Delta -- the API opens a SQLite file
+# exported by the batch layer, which is what lets this tier stay always-on and
+# cheap while Kafka/Spark are scaled to zero (CLAUDE.md section 7).
+FROM python:3.12-slim
+
+WORKDIR /app
+RUN pip install --no-cache-dir fastapi "uvicorn[standard]"
+
+COPY serving/ /app/serving/
+
+# The exported marts (~139 KB) are baked in for the local/demo deployment.
+# In production this path is a ReadWriteMany PVC written by the batch CronJob
+# (see k8s/api.yaml) so the API can be refreshed without a rebuild.
+EXPOSE 8000
+CMD ["python", "-m", "uvicorn", "serving.api:app", "--host", "0.0.0.0", "--port", "8000"]

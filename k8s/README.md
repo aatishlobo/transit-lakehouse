@@ -35,7 +35,41 @@ slow write. CPU-based autoscaling therefore scales the wrong signal. `maxReplica
 is capped at the partition count (3): partitions are the unit of parallelism,
 and replica four would idle forever holding no assignment.
 
-## Apply
+## Verified deployment
+
+The serving tier has been deployed and exercised on minikube (qemu2, k8s 1.35):
+
+```
+$ kubectl -n transit get pods
+NAME                   READY   STATUS    RESTARTS   AGE
+api-686fdc87c7-kslxh   1/1     Running   0          19s
+api-686fdc87c7-xz7lc   1/1     Running   0          19s
+
+$ kubectl -n transit get svc api
+api    NodePort   10.96.182.214   <none>   80:30080/TCP
+
+$ curl http://api.transit.svc.cluster.local/health     # from inside the cluster
+{"status":"ok","freshness":{"is_stale":false,"age_hours":7.6,...}}
+```
+
+Use `k8s/local/api-local.yaml` for a local cluster. It differs from
+`k8s/api.yaml` in exactly one respect: the exported marts are baked into the
+image rather than mounted from a ReadWriteMany PVC, because minikube's default
+storage class is ReadWriteOnce only. Replicas, probes and resource envelope are
+identical, so it exercises the real manifest shape.
+
+```bash
+minikube start --driver=qemu2
+eval $(minikube docker-env)
+docker build -t transit-lakehouse/api:latest -f Dockerfile.api .
+kubectl apply -f k8s/namespace.yaml -f k8s/local/api-local.yaml
+minikube service api -n transit --url
+```
+
+The Kafka, poller and batch manifests require Strimzi and KEDA operators plus
+images for the Spark stack; they are authored but have not been applied.
+
+## Apply (full stack)
 
 ```bash
 kubectl apply -k k8s/                # everything
