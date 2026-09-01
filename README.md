@@ -211,9 +211,39 @@ Full register: [`docs/PITFALLS.md`](docs/PITFALLS.md) — 60 known failure modes
 
 ## Results
 
-**506,490 derived arrivals**, 19 service days, 11 operators.
+**797,943 derived arrivals** across 27 service days (5–31 Aug 2026) and 11 operators.
 
-Prediction accuracy (SF Muni, 25,501 prediction–arrival pairs):
+### On-time performance vs the published timetable
+
+Derived arrival compared to the schedule version in force that service day.
+"On time" is asymmetric — 60 s early to 5 min late — because an early bus and a
+late bus are different failures, and an early one you miss entirely.
+
+| Operator | Arrivals | Median | On time | Early | Late |
+|---|---:|---:|---:|---:|---:|
+| SA | 2,781 | +121 s | 61.7 % | 12.0 % | 26.3 % |
+| WH | 11,546 | +112 s | 59.6 % | 20.2 % | 20.2 % |
+| CC | 28,897 | +95 s | 56.4 % | 25.8 % | 17.8 % |
+| MA | 11,303 | +102 s | 53.0 % | 22.8 % | 24.2 % |
+| SC | 173,889 | +32 s | 52.8 % | 31.5 % | 15.8 % |
+| FS | 1,779 | −5 s | 52.6 % | 36.3 % | 11.2 % |
+| SF | 419,838 | +66 s | 50.7 % | 27.9 % | 21.4 % |
+| AC | 60,702 | +124 s | **32.0 %** | 29.7 % | **38.3 %** |
+| SB | 2,151 | −384 s | 20.0 % | 75.0 % | 5.0 % |
+| AM | 1,185 | −858 s | 4.7 % | 84.7 % | 10.5 % |
+
+The bus operators read credibly. **SB and AM do not** — see the open issue under
+[Limitations](#limitations--read-before-quoting-any-number) before quoting any
+blended figure.
+
+Note that roughly a quarter of arrivals are *more than a minute early*. Since the
+labels are biased **late**, the true early rate is higher still — that is schedule
+padding, and it is why every mart reports early and late separately rather than
+folding them into one "off-schedule" number.
+
+### Prediction accuracy
+
+How wrong the agency's own ETA is (SF Muni, 25,501 prediction–arrival pairs):
 
 ```
    lead time       n     bias  med|err|     p90    <60s   <180s
@@ -251,10 +281,13 @@ the poll that observed them, by up to 97 s.
 > Effects 2–4 push the same direction, so every bias figure here is an **upper
 > bound on agency optimism**, not a point estimate.
 
-**⚠️ Open issue — rail operators.** CE, AM and SB report impossible early
-arrivals (CE median −1320 s, 96.2 % early) while every bus operator looks
-credible. Almost certainly schedule-matching on rail `trip_id`s. **The headline
-on-time figure should not be quoted until this is resolved.**
+**⚠️ Open issue — rail operators.** SB (−384 s median, 75.0 % early) and AM
+(−858 s, 84.7 % early) report impossible early arrivals while every bus operator
+looks credible. A median arrival fourteen minutes ahead of schedule is not a real
+transit pattern. Because the arrival side of the pipeline is shared with the
+operators that look fine, this is almost certainly schedule matching on rail
+`trip_id`s rather than a resolver fault. **Report per-operator with the anomaly
+called out; do not quote a blended on-time figure until it is resolved.**
 
 **The ML model is an afternoon model.** 95.8 % of training rows fall in hours
 14–19, because the archiving machine sleeps overnight.
