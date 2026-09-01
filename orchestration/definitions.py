@@ -130,22 +130,47 @@ def silver_vehicle_positions() -> Output[int]:
 @asset(
     deps=[gtfs_static_snapshot],
     group_name="dimension",
-    description="SCD2 schedule dimension, versioned on schedule-relevant attributes.",
+    description="GTFS CSV -> Delta staging. No versioning; dbt owns Type-2 history.",
 )
-def dim_stop_schedule() -> Output[dict]:
+def gtfs_stop_schedule_staging() -> Output[dict]:
     _ensure_path()
-    from spark.dim_schedule import run
+    from spark.stage_gtfs import run
 
     cands = sorted((REPO / "data/static/extracted").glob("*"))
     if not cands:
         raise RuntimeError("no extracted GTFS-Static")
 
-    spark = _spark("dagster-dim", shuffle_partitions=64, driver_memory="6g")
+    spark = _spark("dagster-stage", shuffle_partitions=64, driver_memory="6g")
     try:
         stats = run(spark, str(cands[-1]), LAKE)
     finally:
         spark.stop()
     return Output(stats, metadata={k: str(v) for k, v in stats.items()})
+
+
+@asset(
+    deps=[gtfs_stop_schedule_staging],
+    group_name="dimension",
+    description="SCD2 schedule dimension, via `dbt snapshot` (strategy=check).",
+)
+def dim_stop_schedule() -> Output[str]:
+    """Type-2 history is dbt's job, not a hand-rolled MERGE.
+
+    strategy='check' over schedule-relevant columns only: a GTFS zip differing
+    in a shape file must not open a new version of all 3.8M stop times.
+    """
+    import os
+
+    env = {**os.environ, "JAVA_HOME": JAVA_HOME}
+    r = subprocess.run(
+        [str(REPO / ".venv-spark/bin/dbt"), "snapshot",
+         "--project-dir", "dbt", "--profiles-dir", "dbt"],
+        cwd=REPO, env=env, capture_output=True, text=True,
+    )
+    tail = "\n".join(r.stdout.strip().splitlines()[-8:])
+    if r.returncode != 0:
+        raise RuntimeError(f"dbt snapshot failed:\n{tail}")
+    return Output("ok", metadata={"dbt_tail": MetadataValue.md(f"```\n{tail}\n```")})
 
 
 # --- facts --------------------------------------------------------------
@@ -263,8 +288,10 @@ def check_one_current_version() -> AssetCheckResult:
 
     spark = _spark("check-scd2", shuffle_partitions=32, driver_memory="6g")
     try:
-        cur = spark.read.format("delta").load(f"{LAKE}/dim/dim_stop_schedule").filter(F.col("is_current"))
-        n, k = cur.count(), cur.select("trip_id", "stop_sequence").distinct().count()
+        dim = spark.read.format("delta").load("spark-warehouse/transit.db/dim_stop_schedule")
+        # dbt marks the open version with dbt_valid_to IS NULL.
+        cur = dim.filter(F.col("dbt_valid_to").isNull())
+        n, k = cur.count(), cur.select("schedule_key").distinct().count()
     finally:
         spark.stop()
     return AssetCheckResult(passed=(n == k), metadata={"current_rows": n, "distinct_keys": k})
@@ -277,6 +304,7 @@ daily_refresh = define_asset_job("daily_refresh", selection="*")
 defs = Definitions(
     assets=[
         gtfs_static_snapshot,
+        gtfs_stop_schedule_staging,
         bronze_vehicle_positions,
         silver_vehicle_positions,
         dim_stop_schedule,

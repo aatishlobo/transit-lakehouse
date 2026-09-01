@@ -30,7 +30,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from pyspark.sql import DataFrame, SparkSession, functions as F
+from pyspark.sql import DataFrame, SparkSession, Window, functions as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -46,9 +46,53 @@ ON_TIME_EARLY_S = -60
 ON_TIME_LATE_S = 300
 
 
-def build_otp(spark: SparkSession, lake_root: str = "lake") -> tuple[DataFrame, dict]:
+DIM_PATH = "spark-warehouse/transit.db/dim_stop_schedule"
+
+
+def build_otp(
+    spark: SparkSession,
+    lake_root: str = "lake",
+    dim_path: str = DIM_PATH,
+) -> tuple[DataFrame, dict]:
     facts = spark.read.format("delta").load(f"{lake_root}/gold/fct_stop_arrival")
-    dim = spark.read.format("delta").load(f"{lake_root}/dim/dim_stop_schedule")
+
+    # The SCD2 dimension is produced by `dbt snapshot`, which writes it into
+    # the warehouse rather than under lake/. dbt owns Type-2 history here: its
+    # snapshot mechanism exists for exactly this, and keeping the versioning in
+    # one declarative place beats a hand-rolled MERGE.
+    dim_raw = spark.read.format("delta").load(f"{dim_path}")
+
+    # dbt records the CURRENT version with dbt_valid_to = NULL and stamps
+    # dbt_valid_from at snapshot time. Two adjustments are needed before this
+    # can be joined as-of:
+    #
+    #   1. NULL upper bound -> a far-future sentinel, so the predicate stays a
+    #      simple half-open interval instead of an OR that is easy to get wrong
+    #      once and then wrong everywhere.
+    #
+    #   2. The FIRST version of each key is backdated to epoch. We began
+    #      snapshotting the schedule after the realtime archive was already
+    #      running, so no observed version covers the earlier service dates and
+    #      an unadjusted join would match nothing for them. Backdating asserts
+    #      the first schedule we saw was also in force before we saw it -- true
+    #      in practice (timetables change monthly) but an ASSUMPTION, so every
+    #      row carries valid_from_assumed and any analysis that cannot tolerate
+    #      it can filter on that column.
+    first_version = Window.partitionBy("schedule_key").orderBy(F.col("dbt_valid_from").asc())
+    dim = (
+        dim_raw.withColumn("_v", F.row_number().over(first_version))
+        .withColumn("valid_from_assumed", F.col("_v") == 1)
+        .withColumn(
+            "valid_from",
+            F.when(F.col("_v") == 1, F.lit("1970-01-01 00:00:00").cast("timestamp"))
+            .otherwise(F.col("dbt_valid_from")),
+        )
+        .withColumn(
+            "valid_to",
+            F.coalesce(F.col("dbt_valid_to"), F.lit("2999-01-01 00:00:00").cast("timestamp")),
+        )
+        .drop("_v")
+    )
 
     n_facts = facts.count()
 
@@ -148,8 +192,8 @@ def build_otp(spark: SparkSession, lake_root: str = "lake") -> tuple[DataFrame, 
     return out, stats
 
 
-def run(spark: SparkSession, lake_root: str = "lake") -> dict:
-    out, stats = build_otp(spark, lake_root)
+def run(spark: SparkSession, lake_root: str = "lake", dim_path: str = DIM_PATH) -> dict:
+    out, stats = build_otp(spark, lake_root, dim_path)
 
     # Join conservation is an assertion, not a metric. A LEFT join that changed
     # the row count means a duplicate dimension version matched -- exactly the

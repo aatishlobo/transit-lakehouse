@@ -20,3 +20,9 @@ models:
 vars:
   # Absolute so dbt's chdir into the project dir cannot change what it reads.
   lake_root: "/Users/aatishlobo/Desktop/transit-lakehouse/lake"
+
+snapshot-paths: ["snapshots"]
+
+snapshots:
+  transit_lakehouse:
+    +file_format: delta

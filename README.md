@@ -1,144 +1,267 @@
 # transit-lakehouse
 
-**Measuring how wrong Bay Area transit predictions actually are — through a Kafka streaming pipeline.**
+**Deriving transit arrival times that no agency publishes — then grading the
+schedule and the predictions against them.**
 
-> Data provided by [511.org](http://www.511.org) — Metropolitan Transportation Commission.
+> Data provided by [511.org](http://www.511.org) — Metropolitan Transportation
+> Commission (MTC).
 
 ---
 
 ## The problem
 
-Transit agencies publish two live feeds: **predictions** ("the bus will reach
-stop 22 at 15:07") and **GPS positions** ("bus 4821 is here, now"). Neither ever
-states *"bus 4821 arrived at stop 22 at 15:09."*
+Transit agencies publish two live feeds through GTFS-Realtime:
 
-That fact has to be **derived**. And because delay = actual − scheduled, with
-scheduled published and exact, **every error in the derivation lands directly in
-the final number** — nothing downstream can correct it.
+- **TripUpdates** — *predictions*: "the vehicle on trip X will reach stop 22 at 15:07"
+- **VehiclePositions** — *GPS observations*: "vehicle 4821 is at this coordinate, now"
 
-This project derives arrivals from vehicle state transitions, then uses them to
-answer a question nobody publishes an answer to:
+Neither ever states **"vehicle 4821 arrived at stop 22 at 15:09."** The fact of
+arrival is not published by anyone. It has to be **derived**.
 
-> **When an agency says the bus arrives in *N* minutes, how wrong is it?**
+That matters more than it first looks. Delay is `actual − scheduled`, and
+`scheduled` is published and exact. So **every error in deriving `actual` lands
+directly in the answer**, and nothing downstream can detect or correct it. The
+danger is *bias*, not noise: random error averages out across a route, while a
+systematic offset shifts an entire distribution invisibly.
 
-The answer is only meaningful because the two halves come from **independent
-feeds** — predictions from TripUpdates, actual arrivals from VehiclePositions.
+This project derives arrivals from vehicle state transitions, then answers two
+questions nobody publishes an answer to:
 
-## The result
-
-SF Muni, 25,501 (prediction, arrival) pairs:
-
-```
-   lead time       n     bias  med|err|     p90    <60s   <180s
-     0-2 min     509      -11        13      52   92.7%  100.0%
-     2-5 min    4603      -46        50     112   59.5%   98.4%
-     5-10 min   4897      -66        70     172   43.3%   91.2%
-    10-20 min   8919      -98       102     257   31.1%   77.0%
-      20+ min   6573     -142       146     375   23.0%   59.3%
-```
-
-Short-horizon predictions are excellent; accuracy degrades steadily with
-horizon. The bias is negative throughout — vehicles arrive **later** than
-promised — and grows to 2.4 minutes at long horizons.
-
-**Important caveat, stated up front:** our derived arrivals are biased late and
-over-sample long-dwell stops, so this is an **upper bound** on agency optimism,
-not a point estimate. See [Limitations](#limitations).
-
-A bounded ML model then corrects those predictions, cutting error **14.7%** below
-the agency's own ETA.
+| Question | Needs |
+|---|---|
+| When an agency says *N* minutes, how wrong is it? | realtime feeds only |
+| Is the vehicle on time against the **published timetable**? | GTFS-Static + SCD2 dimension + as-of join |
 
 ---
 
 ## Architecture
 
-```
-                     511 regional GTFS-Realtime          511 GTFS-Static
-                     (protobuf, 60 req/hour)             (68 MB zip)
-                              |                                |
-                    poller (exactly 1 replica)      fetch_static (content-addressed)
-                    archive-before-decode                       |
-                              v                                 |
-                    data/raw/  [SYSTEM OF RECORD]        data/static/
-                              |                                 |
-              +---------------+---------------+                 |
-              v                               v                 |
-     Pydantic contract                 spark/bronze             |
-              |                        decode + explode         |
-              v                               v                 v
-        Kafka topics  -> resolver      Delta bronze      spark/dim_schedule
-        (24h, delete)     |                  v            SCD2, 3.87M rows
-                          |            Delta silver              |
-                          |                  v                   |
-                          +--------> gold/fct_stop_arrival       |
-                                     idempotent MERGE            |
-                                            |                    |
-                                            +----> AS-OF JOIN <--+
-                                                        v
-                                              gold/fct_stop_otp
-                                                        v
-                                                 dbt marts (17 tests)
-                                                        v
-                                          SQLite export -> FastAPI + dashboard
+Three tiers. The **archive** is the system of record; everything else is
+rebuildable from it.
 
-        orchestrated by Dagster (dbt is an ASSET EDGE, not a schedule offset)
+### 1 · Ingest — the only irreplaceable part
+
+```
+   511 GTFS-Realtime                        511 GTFS-Static
+   protobuf · 60 req/hr                     68 MB zip
+          │                                        │
+          │  poller — EXACTLY 1 replica            │  content-addressed:
+          │  archive bytes BEFORE decoding         │  unchanged feed = no-op
+          ▼                                        ▼
+   ┌──────────────────────┐               ┌──────────────────────┐
+   │  data/raw/           │               │  data/static/        │
+   │  ingest_dt=…/*.pb.gz │               │  fetched_dt=…/*.zip  │
+   └──────────────────────┘               └──────────────────────┘
+        SYSTEM OF RECORD — GTFS-RT has no history endpoint.
+        A poll not taken is gone permanently.
 ```
 
-**Prediction accuracy vs on-time performance.** These are different questions and
-the project answers both. *Prediction accuracy* compares the derived arrival to
-what the agency predicted; it needs only the realtime feeds. *On-time
-performance* compares the derived arrival to the published timetable, which
-requires GTFS-Static, an SCD2 dimension, and an as-of join so a trip resolves
-against the schedule that was in force on its service date.
+### 2 · Two paths out of the archive
 
-**Three structural decisions**
+```
+   ┌───────────── STREAMING PATH ─────────────┐   ┌──── LAKEHOUSE PATH ────┐
+   │                                          │   │                        │
+   │  Pydantic contract  ──► dead-letter      │   │  Spark Structured      │
+   │         │               (invalid)        │   │  Streaming             │
+   │         ▼                                │   │  readStream + ckpt     │
+   │  Kafka · 4 topics · 3 partitions         │   │         │              │
+   │  key = service_date:trip_id              │   │         ▼              │
+   │  cleanup=delete · 24 h retention         │   │   BRONZE  (Delta)      │
+   │         │                                │   │   decode + explode     │
+   │         ▼                                │   │         │              │
+   │  arrival resolver                        │   │         ▼              │
+   │  STOPPED_AT transitions                  │   │   SILVER  (Delta)      │
+   │         │                                │   │   typed · deduped      │
+   │         ▼                                │   │         │              │
+   │  prediction-accuracy metrics             │   │         ▼              │
+   │                                          │   │   GOLD  fct_stop_      │
+   └──────────────────────────────────────────┘   │        arrival         │
+                                                  │   idempotent MERGE     │
+     Kafka is TRANSPORT, not storage.             └────────┬───────────────┘
+     24 h retention makes it impossible to                 │
+     drift into treating a topic as a database.            │
+```
 
-| Decision | Rejected alternative | Cost |
+### 3 · Schedule join, marts, serving
+
+```
+   staging/gtfs_stop_schedule  ──►  dbt snapshot  ──►  dim_stop_schedule
+   (Spark: CSV → Delta)             STRATEGY=check     SCD2 · 3.87 M rows
+                                                              │
+   gold/fct_stop_arrival ────────────► AS-OF JOIN ◄────────────┘
+                                    valid_from ≤ as_of < valid_to
+                                            │
+                                            ▼
+                                   gold/fct_stop_otp
+                                   join conservation ASSERTED
+                                            │
+                                            ▼
+                                dbt marts · 17 data tests
+                                  (UTC → local, exactly once)
+                                            │
+                                            ▼
+                            SQLite export ──► FastAPI + dashboard
+                                              labels its own staleness
+
+        ── all of it orchestrated by Dagster ──
+        dbt is an ASSET EDGE, never a schedule offset
+```
+
+**Why that last line matters.** The tempting design is two cron schedules with
+an offset — ingest at `:00`, dbt at `:30`. That works until ingest runs long,
+and then dbt reads a half-written dimension and produces marts that are wrong
+without being *obviously* wrong. Nothing errors; the numbers just move.
+
+---
+
+## Five decisions worth defending
+
+| Decision | Rejected alternative | What it cost |
 |---|---|---|
-| Archive is the system of record; Kafka is transport with 24h retention | Kafka as durable storage | Replay needed to rebuild topics |
-| Arrivals from vehicle positions only (resolver A) | Prediction settlement, far better coverage | ~21% capture, only 15 of 28 operators |
-| SCD2 dimension + as-of join | Join to the current schedule | A dimension that grows, and a slower join |
+| Archive is the system of record; Kafka expires in 24 h | Kafka as durable storage | Rebuilding topics needs a replay |
+| Arrivals from **positions only** (resolver A) | Prediction settlement — far better coverage | ~21 % capture; only 15 of 28 operators |
+| Grain is `(service_date, trip_id, stop_sequence)` | Keying on `stop_id` | Wider key; 7 operators revisit a stop mid-trip |
+| **SCD2** dimension + as-of join | Join to the *current* schedule | A dimension that grows, and a slower join |
+| At-least-once + idempotent MERGE | Kafka transactions / exactly-once | Duplicates must be provably harmless |
 
-The third is the one that looks like over-engineering and is not: joining facts
-to the *current* schedule silently recomputes every historical number each time
-an agency republishes a timetable.
+The fourth looks like over-engineering and is not. Joining facts to the current
+schedule silently rewrites history every time an agency republishes a timetable.
+
+---
 
 ## Quick start
 
-Two environments, deliberately separate. Spark 4 needs Java 17+ and Python
-<=3.12; the ingest service is 3.13 and pins protobuf for the ML stack.
+Two environments, deliberately separate. Spark 4 needs **Java 17+** and Python
+≤ 3.12; the ingest service runs 3.13 and pins protobuf for the ML stack.
 
 ```bash
-make venv          # ingest + serving      (python3, protobuf pinned)
+make venv          # ingest + serving        (python3, protobuf pinned)
 make venv-spark    # Spark/Delta/dbt/Dagster (python3.12 + JDK 21)
 ```
 
-**The local Kafka demo** (no API key, deterministic replay):
+**Kafka demo** — deterministic replay, no API key:
 
 ```bash
-make demo          # replay -> Kafka -> resolver -> metrics -> checks
+make demo          # replay → Kafka → resolver → metrics → acceptance checks
 ```
 
-**The lakehouse**, from the archive through to the dashboard:
+**Lakehouse** — archive through to dashboard:
 
 ```bash
-make static        # fetch GTFS-Static (needs API_511_KEY)
-make full          # bronze -> silver -> gold -> dim -> otp -> marts -> export
-make serve         # dashboard on http://localhost:8000
+make static        # fetch GTFS-Static            (needs API_511_KEY)
+make full          # bronze → silver → gold → snapshot → otp → marts → export
+make serve         # dashboard at http://localhost:8000
+```
+
+**Streaming bronze** — the same decode, driven by `readStream`:
+
+```bash
+make bronze-stream            # availableNow: consume the backlog, then stop
+make bronze-stream-continuous # stay up, pick up each new poll
 ```
 
 **Tests**
 
 ```bash
-make test          # 97 tests: decode, contracts, resolver, ML leakage, DST
-make lake-test     # 19 tests: lakehouse invariants + SCD2 semantics
-make dbt-test      # 17 dbt tests
+make test          # 116 tests: decode, contracts, resolver, ML leakage, DST
+make lake-test     # lakehouse invariants + SCD2 semantics
+make dbt-test      # 17 dbt data tests
 make k8s-validate  # manifests parse
 ```
 
-## Repository layout
+---
 
-Organised by pipeline stage rather than a single `src/`:
+## Correctness: what this project is actually about
+
+Six invariants. Each corrupts data **silently** if broken — none of them throw.
+
+**1 · Absent is not zero.** GTFS-Realtime is proto2: a field can be genuinely
+absent, which differs from being zero. `delay = 0` means *exactly on time*;
+absent means *no information*. Read naively, protobuf returns `0` for both.
+
+> **Measured: 44.2 % of records carry no delay at all.** Written the obvious
+> way, this project would report ~54,000 records per poll as perfectly on time —
+> a fabricated punctuality spike that looks entirely plausible. Verified against
+> raw protobuf across 408,149 rows, zero violations.
+
+**2 · The grain is `(service_date, trip_id, stop_sequence)`** — never `stop_id`.
+Seven of 28 operators run trips revisiting the same stop; a `stop_id` grain
+merges two real events into one.
+
+**3 · `service_date` comes from the trip, never from a clock.** Service days run
+past midnight. Relatedly the raw archive partitions on `ingest_dt`: one payload
+contains trips from *several* service dates, so service date is a property of a
+**row**, not a file.
+
+**4 · Event time comes from the producer, never our poll clock.** A stale feed
+would otherwise manufacture observations that never happened.
+
+**5 · Timestamps stored UTC, converted exactly once** — in `stg_stop_otp`, at
+the serving boundary. Truncating hour-of-day in UTC shifts every bar of an
+hourly chart by 7–8 hours while leaving totals correct.
+
+**6 · Scheduled times use the GTFS noon-minus-12h anchor.** Not midnight —
+midnight can be skipped or repeated by a DST transition, noon never is. Pinned
+by tests on **both** 2026 transitions, because the naive version errs in
+*opposite directions* on each.
+
+Full register: [`docs/PITFALLS.md`](docs/PITFALLS.md) — 60 known failure modes.
+
+---
+
+## Results
+
+**506,490 derived arrivals**, 19 service days, 11 operators.
+
+Prediction accuracy (SF Muni, 25,501 prediction–arrival pairs):
+
+```
+   lead time       n     bias  med|err|     p90    <60s   <180s
+     0–2 min     509      -11        13      52   92.7%  100.0%
+     2–5 min    4603      -46        50     112   59.5%   98.4%
+     5–10 min   4897      -66        70     172   43.3%   91.2%
+    10–20 min   8919      -98       102     257   31.1%   77.0%
+      20+ min   6573     -142       146     375   23.0%   59.3%
+```
+
+Short-horizon predictions are excellent; accuracy degrades steadily with
+horizon, and the bias is negative throughout — vehicles arrive **later** than
+promised.
+
+A bounded ML model corrects those predictions, cutting error **13.5 %** below the
+agency's own ETA (168.5 s vs 194.7 s MAE), beating three explicit baselines.
+
+---
+
+## Limitations — read before quoting any number
+
+**Coverage is ~21 % of stop events.** Vehicles dwell for seconds; the 60 req/hr
+quota caps polling at 120 s. 85.7 % of captured arrivals appear in exactly one poll.
+
+**Derived arrivals are biased late.** A vehicle is observable as `STOPPED_AT`
+only *between* arriving and departing, so timestamps fall at or after true
+arrival — never before.
+
+**Long dwells are over-represented.** Capture probability scales with dwell
+time, so terminals and layovers are oversampled.
+
+**Vehicle clocks drift.** 3.7 % of arrivals carry a vehicle timestamp *ahead* of
+the poll that observed them, by up to 97 s.
+
+> Effects 2–4 push the same direction, so every bias figure here is an **upper
+> bound on agency optimism**, not a point estimate.
+
+**⚠️ Open issue — rail operators.** CE, AM and SB report impossible early
+arrivals (CE median −1320 s, 96.2 % early) while every bus operator looks
+credible. Almost certainly schedule-matching on rail `trip_id`s. **The headline
+on-time figure should not be quoted until this is resolved.**
+
+**The ML model is an afternoon model.** 95.8 % of training rows fall in hours
+14–19, because the archiving machine sleeps overnight.
+
+---
+
+## Repository layout
 
 | Path | Contents |
 |---|---|
@@ -146,178 +269,37 @@ Organised by pipeline stage rather than a single `src/`:
 | `ingest/poller/poller.py` | fetch, archive-first, rate budget, stale detection |
 | `ingest/static/` | 511 GTFS-Static fetch, content-addressed archive |
 | `streaming/` | Pydantic contracts, Kafka producer/consumer, resolver, aggregator |
-| `spark/session.py` | UTC, Delta, pinned retention, one shared metastore |
-| `spark/bronze.py` | archive → Delta; reuses `decode.py` unmodified |
-| `spark/silver.py` | typed, deduplicated, quality-flagged |
-| `spark/gold.py` | `fct_stop_arrival`, idempotent MERGE on the grain |
+| `spark/bronze_stream.py` | **Structured Streaming** bronze — `readStream` + checkpoint |
+| `spark/bronze.py` · `silver.py` · `gold.py` | batch medallion, idempotent MERGE |
 | `spark/scheduled_time.py` | GTFS noon-minus-12h arithmetic; both DST transitions |
-| `spark/dim_schedule.py` | SCD2 schedule dimension |
+| `spark/stage_gtfs.py` | GTFS CSV → Delta staging for the dbt snapshot |
 | `spark/fct_otp.py` | as-of join → true on-time performance |
-| `dbt/` | 4 models, 17 tests, marts for serving |
+| `dbt/snapshots/` | **SCD2 schedule dimension** (`strategy='check'`) |
+| `dbt/models/` | 4 models, 17 data tests |
 | `orchestration/definitions.py` | Dagster assets + asset checks |
 | `serving/` | SQLite export, FastAPI, dashboard |
-| `k8s/` | Strimzi, KEDA, CronJob, single-replica poller |
-| `ml/` | feature build, training, inference for the AI element |
-| `evaluation/` | acceptance checks |
+| `k8s/` | Strimzi, KEDA lag autoscaling, single-replica poller |
+| `ml/` | feature build, training, inference (leakage defences) |
 | `tests/` | 116 tests across two interpreters |
-
-## Correctness: what this project is actually about
-
-Five invariants, each of which corrupts data **silently** if broken. None throw.
-
-**Absent is not zero.** GTFS-Realtime is proto2: a field can be genuinely absent,
-which differs from being zero. `delay = 0` means *exactly on time*; absent means
-*no information*. Read naively, protobuf returns `0` for both.
-
-**Measured: 44.2% of records carry no delay at all.** Written the obvious way,
-this project would report ~54,000 records per poll as perfectly on time — a
-fabricated spike that looks entirely plausible and corrupts every downstream
-metric. Verified against raw protobuf across 408,149 rows with zero violations.
-
-**The grain is `(service_date, trip_id, stop_sequence)`,** never `stop_id`. Seven
-of 28 operators run trips revisiting the same stop; a `stop_id` grain merges two
-real events into one.
-
-**`service_date` comes from the trip, never from a clock.** Service days run past
-midnight. Relatedly, the raw archive partitions on `ingest_dt` — a single payload
-contains trips from *several* service dates, so service date is a property of a
-row, not a file.
-
-**Event time comes from the producer, never our poll clock.** A stale feed would
-otherwise manufacture observations that never happened.
-
-**Timestamps stored UTC, converted once at the end.** Truncating hour-of-day in
-UTC shifts every bar of an hourly chart by 7–8 hours while leaving totals
-correct.
-
-Full register: [`docs/PITFALLS.md`](docs/PITFALLS.md) — 60 known failure modes.
-
----
-
-## Validation
-
-```bash
-make evaluate
-```
-
-| Check | Result |
-|---|---|
-| `null_zero_discrimination` | 408,149 rows vs raw protobuf, **0 violations** |
-| `contract_validation` | 245,701 valid, 0 invalid |
-| `grain_uniqueness` | 6,046 arrivals, 6,046 distinct keys |
-| `idempotent_resolution` | two runs, bit-for-bit identical |
-| `provenance_complete` | 0 missing fields |
-| `event_time_not_ingest_time` | 0 collisions |
-
-Every check carries a **row-count floor** and reports `UNMEASURED` rather than
-`PASS` when handed too little data — a check that passes on an empty table is
-worse than no check.
-
----
-
-## Optional extension: controlled method comparison
-
-*This is the single labelled extension beyond the required minimum. Full write-up
-in `report.pdf` §10.*
-
-Four methods for predicting a vehicle's arrival, evaluated on **one input, one
-temporal split, one named metric** (MAE in seconds). Three baselines and one
-learned model.
-
-**Exact steps** — no API key, no Kafka, no network. Runs from committed data:
-
-```bash
-make venv && source .venv/bin/activate
-make train
-```
-
-~10 seconds. Input `ml/data/features_sample.csv.gz` (168,160 rows, committed).
-
-**Expected output** — console table, and the same figures saved to
-`ml/artifacts/training_report.json`:
-
-| Method | MAE (s) | RMSE (s) | bias (s) | within 60 s |
-|---|---|---|---|---|
-| trust the agency unchanged | 194.7 | 380.9 | -152.3 | 30.9% |
-| add one global mean residual | 215.1 | 358.2 | +80.1 | 14.9% |
-| add mean residual per lead-time bucket | 206.3 | 358.9 | +76.1 | 22.6% |
-| **learned correction** | **168.5** | **308.9** | **+45.3** | **31.8%** |
-
-**Saved artifacts, both submitted:** `ml/artifacts/training_report.json` (metrics,
-split definition, and every feature accepted or rejected with the reason) and
-`ml/artifacts/prediction_correction_model.joblib`.
-
-**The result worth reading twice:** the model beats the agency by 13.5%, but
-*both naive bias corrections lose to doing nothing.* Residuals are heavily
-right-skewed — at a 20-minute horizon the mean is +295 s while the median is
-+174 s — so adding the mean overcorrects the typical vehicle to accommodate the
-rare one. The project's own headline finding, applied naively, makes predictions
-worse. That is precisely why the model learns a *conditional* correction rather
-than a constant.
-
-These figures come from the committed sample. The report's §7.2 quotes 166.6 s
-from the full 1.34 M-row local archive, which is 137 MB and not submitted; the
-1.9 s gap is the cost of shipping a reviewable subset, noted so a reproduced
-168.5 s reads as confirmation.
-
----
-
-## Limitations
-
-Stated plainly, because several affect how the headline number should be read.
-
-**Coverage is ~21% of stop events.** Vehicles dwell for seconds; we sample every
-120 seconds (a 60 req/hour quota). 90.3% of captured events appear in exactly one
-poll.
-
-**Derived arrivals are biased late.** A vehicle is observable as `STOPPED_AT`
-only between arriving and departing, so timestamps fall at or after true arrival
-— never before.
-
-**Long-dwell stops are over-represented.** Capture probability scales with dwell
-time, so terminals and layovers dominate. Median observed dwell among multi-poll
-sightings: 353 seconds. **Together these mean the measured bias is an upper
-bound.**
-
-**One operator, six days.** SF Muni only; no seasonal or holiday variation.
-
-**The ML model is afternoon/evening only** — 95.8% of training data falls in
-hours 14–19, because the archiving machine sleeps overnight.
-
-**Scope taken deliberately:** a plain-Python consumer rather than Spark
-Structured Streaming, and prediction accuracy rather than schedule-based on-time
-performance (which would require GTFS-Static). Both are documented deviations
-from the original proposal.
 
 ---
 
 ## Data and licensing
 
-Source data is provided by 511.org under the **511 Data Disseminator Agreement**.
-Full terms, schema, rate limits and rights in [`DATA_SOURCE.md`](DATA_SOURCE.md).
+Source: **511 SF Bay Open Data**, Metropolitan Transportation Commission.
+Governed by the 511 Data Disseminator Agreement. §5(b) attribution is met here,
+in `DATA_SOURCE.md`, and programmatically in every generated artifact.
 
-**This repository is private.** §2(c) of the agreement requires securing written
-acceptance of its terms before providing the data to third parties, and
-`data/replay_sample/` contains verbatim 511 protobuf payloads rather than
-derivative works. Access is granted individually.
-
-No credentials are committed. `.env` and all logs are gitignored; the API key is
-redacted at source in poller output.
+Full documentation of schema, rights, rate limits and replay:
+[`DATA_SOURCE.md`](DATA_SOURCE.md).
 
 ---
 
 ## Documentation
 
-| Document | Purpose |
+| Doc | Contents |
 |---|---|
-| [`docs/PIPELINE_WALKTHROUGH.md`](docs/PIPELINE_WALKTHROUGH.md) | **Start here** — what actually happens to the data, stage by stage |
-| [`docs/ONBOARDING.md`](docs/ONBOARDING.md) | Full catch-up guide for a new contributor |
-| [`DATA_SOURCE.md`](DATA_SOURCE.md) | Source, schema, rights, limitations |
-| [`AI_USAGE.md`](AI_USAGE.md) | The AI element, and AI-assisted development disclosure |
-| [`CLAUDE.md`](CLAUDE.md) | Project constitution — invariants and rationale |
-| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 60 known failure modes, tiered |
-| [`docs/reports/`](docs/reports/) | Day-by-day build log, written for non-specialists |
-
----
-
-*MSDS 682 — Data Stream Processing, University of San Francisco, Summer 2026.*
+| [`docs/PITFALLS.md`](docs/PITFALLS.md) | 60-item failure register, tiered S1/S2/S3 |
+| [`docs/PIPELINE_WALKTHROUGH.md`](docs/PIPELINE_WALKTHROUGH.md) | end-to-end explainer |
+| [`AI_USAGE.md`](AI_USAGE.md) | the bounded AI element + verification |
+| [`docs/decisions/`](docs/decisions/) | ADRs |

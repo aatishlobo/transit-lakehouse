@@ -4,7 +4,8 @@
         replay resolve aggregate evaluate demo demo-clean features train predict \
         venv-spark bronze silver gold lake lake-test lake-clean \
         static dim otp dbt-run dbt-test marts serve-export serve \
-        dagster-ui dagster-run k8s-validate full
+        dagster-ui dagster-run k8s-validate full \
+        bronze-stream bronze-stream-continuous stage-gtfs dbt-snapshot
 
 # Use the isolated venv explicitly rather than whatever `python` resolves to.
 # This service pins protobuf <7.0 for compatibility with the ML stack; picking
@@ -159,7 +160,27 @@ demo-clean:         ## demo from a torn-down Kafka -- use this for a live demo
 	-@$(MAKE) --no-print-directory kafka-down
 	@$(MAKE) --no-print-directory demo
 
+# ---- Structured Streaming bronze ----------------------------------------
+# Same decode as the batch job; the checkpoint replaces the hand-rolled
+# processed-files table and commits atomically with the write.
+
+bronze-stream:      ## consume the backlog, then stop (availableNow)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.bronze_stream \
+	  --feed vehicle_positions --data-root $(DATA_ROOT) --lake-root $(LAKE_ROOT)
+
+bronze-stream-continuous:  ## stay up on a 120s trigger, matching the poller
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.bronze_stream \
+	  --feed vehicle_positions --data-root $(DATA_ROOT) --lake-root $(LAKE_ROOT) \
+	  --continuous
+
 # ---- Schedule dimension + OTP -------------------------------------------
+
+stage-gtfs:         ## extracted GTFS CSV -> Delta staging (no versioning)
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK) -m spark.stage_gtfs --lake-root $(LAKE_ROOT)
+
+dbt-snapshot:       ## SCD2 schedule dimension, via dbt snapshot
+	JAVA_HOME=$(JAVA_HOME) $(PY_SPARK_BIN)/dbt snapshot --project-dir dbt --profiles-dir dbt
+
 
 static:             ## fetch + archive 511 GTFS-Static (counts against the quota)
 	$(PY) -m ingest.static.fetch_static
@@ -205,7 +226,7 @@ k8s-validate:
 	$(PY) -c "import yaml,glob; [list(yaml.safe_load_all(open(f))) for f in glob.glob('k8s/*.yaml')]; print('manifests parse OK')"
 
 # The whole lakehouse, in dependency order. Kafka path is separate (`make demo`).
-full: lake dim otp marts serve-export
+full: lake stage-gtfs dbt-snapshot otp marts serve-export
 	@echo "lakehouse rebuilt. `make serve` to view."
 
 # ---- Replay sample ------------------------------------------------------
