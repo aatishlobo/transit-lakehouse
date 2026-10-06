@@ -194,14 +194,6 @@ late bus are different failures, and an early one you miss entirely.
 | SB | 2,151 | −384 s | 20.0 % | 75.0 % | 5.0 % |
 | AM | 1,185 | −858 s | 4.7 % | 84.7 % | 10.5 % |
 
-The bus operators read credibly. **SB and AM do not** — see the open issue under
-[Limitations](#limitations--read-before-quoting-any-number) before quoting any
-blended figure.
-
-Note that roughly a quarter of arrivals are *more than a minute early*. Since the
-labels are biased **late**, the true early rate is higher still — that is schedule
-padding, and it is why every mart reports early and late separately rather than
-folding them into one "off-schedule" number.
 
 ### Prediction accuracy
 
