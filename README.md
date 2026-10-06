@@ -114,7 +114,7 @@ without being *obviously* wrong. Nothing errors; the numbers just move.
 
 ---
 
-## Five decisions worth defending
+## Some Key Design Decicions
 
 | Decision | Rejected alternative | What it cost |
 |---|---|---|
@@ -168,44 +168,6 @@ make lake-test     # lakehouse invariants + SCD2 semantics
 make dbt-test      # 17 dbt data tests
 make k8s-validate  # manifests parse
 ```
-
----
-
-## Correctness: what this project is actually about
-
-Six invariants. Each corrupts data **silently** if broken — none of them throw.
-
-**1 · Absent is not zero.** GTFS-Realtime is proto2: a field can be genuinely
-absent, which differs from being zero. `delay = 0` means *exactly on time*;
-absent means *no information*. Read naively, protobuf returns `0` for both.
-
-> **Measured: 44.2 % of records carry no delay at all.** Written the obvious
-> way, this project would report ~54,000 records per poll as perfectly on time —
-> a fabricated punctuality spike that looks entirely plausible. Verified against
-> raw protobuf across 408,149 rows, zero violations.
-
-**2 · The grain is `(service_date, trip_id, stop_sequence)`** — never `stop_id`.
-Seven of 28 operators run trips revisiting the same stop; a `stop_id` grain
-merges two real events into one.
-
-**3 · `service_date` comes from the trip, never from a clock.** Service days run
-past midnight. Relatedly the raw archive partitions on `ingest_dt`: one payload
-contains trips from *several* service dates, so service date is a property of a
-**row**, not a file.
-
-**4 · Event time comes from the producer, never our poll clock.** A stale feed
-would otherwise manufacture observations that never happened.
-
-**5 · Timestamps stored UTC, converted exactly once** — in `stg_stop_otp`, at
-the serving boundary. Truncating hour-of-day in UTC shifts every bar of an
-hourly chart by 7–8 hours while leaving totals correct.
-
-**6 · Scheduled times use the GTFS noon-minus-12h anchor.** Not midnight —
-midnight can be skipped or repeated by a DST transition, noon never is. Pinned
-by tests on **both** 2026 transitions, because the naive version errs in
-*opposite directions* on each.
-
-Full register: [`docs/PITFALLS.md`](docs/PITFALLS.md) — 60 known failure modes.
 
 ---
 
